@@ -8,7 +8,9 @@
 const $ = id => document.getElementById(id);
 const H = {
   status: $('status'), pos: $('pos'),
-  gs: $('gs'), alt: $('alt'), mach: $('mach'), vs: $('vs'), oat: $('oat'), wind: $('wind'),
+  gs: $('gs'), alt: $('alt'), oat: $('oat'), wind: $('wind'),
+  gscap: $('gscap'), altcap: $('altcap'), oatcap: $('oatcap'), windcap: $('windcap'),
+  narr: $('narr'), pro: $('pro'),
   dbg: $('dbg'), horizon: $('horizon'), profile: $('profile'),
   overlay: $('overlay'), osub: $('osub'), start: $('start'), demo: $('demo'), reset: $('reset')
 };
@@ -31,6 +33,7 @@ const group = n => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' '
 const fmtT = s => { s = Math.max(0, s | 0); const m = (s / 60) | 0, r = s % 60; return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r; };
 const fmtLat = v => Math.abs(v).toFixed(2) + '°' + (v >= 0 ? 'N' : 'S');
 const fmtLng = v => Math.abs(v).toFixed(2) + '°' + (v >= 0 ? 'E' : 'W');
+const fmtEta = s => { s = Math.max(0, s | 0); const h = (s / 3600) | 0, m = Math.round((s % 3600) / 60); return h ? h + 'h ' + m + 'm' : m + 'm'; };
 
 /* ---------------- atmosphere model (ISA) ---------------- */
 function isa(altM) {
@@ -148,8 +151,8 @@ function land() {
     }));
   } catch (e) {}
   showOverlay('complete',
-    'T+' + fmtT(S.flightT) + ' &middot; max ' + group(S.maxAlt * M2FT) + ' ft &middot; ' +
-    group(S.maxGs) + ' kt &middot; ' + S.samples.length + ' samples &middot; full report at the gate', true);
+    'T+' + fmtT(S.flightT) + ' &middot; max ' + (S.maxAlt / 1000).toFixed(1) + ' km &middot; ' +
+    group(S.maxGs * 1.852) + ' km/h &middot; ' + S.samples.length + ' samples &middot; full report at the gate', true);
 }
 
 setInterval(() => {
@@ -276,13 +279,77 @@ function drawProfile() {
   ctx.fillText('alt profile', w - 4, 4);
 }
 
+/* ---------------- human language layer ---------------- */
+function speedCaption(kmh) {
+  if (kmh < 5) return 'standing still';
+  if (kmh < 120) return 'faster than a city car';
+  if (kmh < 350) return Math.round(kmh / 110) + '× a motorway car';
+  return Math.round(kmh / 300) + '× faster than a bullet train';
+}
+
+function altCaption(km) {
+  if (km < 0.05) return 'on the runway';
+  if (km < 1) return 'above the city';
+  if (km < 2.5) return 'above the clouds';
+  if (km < 4.8) return 'higher than Mont Blanc';
+  return 'higher than Everest';
+}
+
+function oatCaption(c) {
+  if (c > 20) return 'a summer day';
+  if (c > 0) return 'a cool day';
+  if (c > -20) return 'colder than a freezer';
+  if (c > -40) return 'colder than an arctic winter';
+  return 'cold enough to freeze your breath';
+}
+
+function windCaption(kmh) {
+  if (Math.abs(kmh) < 20) return 'calm air';
+  return kmh > 0 ? 'tailwind — pushing us along' : 'headwind — slowing us down';
+}
+
+function narrator() {
+  const kmh = S.gs * 3.6, km = S.alt / 1000;
+  if (S.mode === 'demo' || S.mode === 'flying') {
+    if (S.alt < 20) {
+      if (S.vs > 1) return 'Wheels up.';
+      if (kmh < 30) return S.flightT > 60 ? 'Touched down — welcome to Seville.' : 'Lined up on the runway — here we go.';
+      return 'Rolling down the runway at <b>' + Math.round(kmh) + ' km/h</b>.';
+    }
+    if (Math.abs(S.roll) > 10 && km > 8)
+      return 'Banking ' + (S.roll > 0 ? 'right' : 'left') + ' — a turn in the flight path.';
+    if (S.vs > 3)
+      return 'Climbing through <b>' + km.toFixed(1) + ' km</b> — outside it’s <b>−' + Math.abs(Math.round(S.oatC)) + '°C</b>.';
+    if (S.vs < -3)
+      return 'Descending through ' + km.toFixed(1) + ' km — on the ground in about ' +
+        (S.mode === 'demo' ? fmtEta(DEMO_T - S.flightT) : '15 minutes') + '.';
+    if (km > 8) {
+      let s = 'Cruising at <b>' + km.toFixed(1) + ' km</b>, ' + Math.round(kmh) + ' km/h — ' +
+        Math.round(S.mach * 100) + '% the speed of sound.';
+      if (S.windKt > 15) s += ' Tailwind pushing us along.';
+      else if (S.windKt < -15) s += ' Headwind slowing us down.';
+      if (S.mode === 'demo') s += ' Seville in ' + fmtEta(DEMO_T - S.flightT) + '.';
+      return s;
+    }
+    return 'Settling into the climb.';
+  }
+  if (S.mode === 'armed') return S.fix ? 'GPS locked — waiting for takeoff.' : 'Looking for GPS — keep me near a window.';
+  return '';
+}
+
 function updateHUD() {
-  H.gs.textContent = group(S.gs * MS2KT);
-  H.alt.textContent = group(S.alt * M2FT);
-  H.mach.textContent = S.mach.toFixed(2);
-  H.vs.textContent = (S.vs >= 0 ? '+' : '−') + group(Math.abs(S.vs * MS2FPM));
-  H.oat.textContent = S.oatC >= 0 ? '+' + Math.round(S.oatC) : Math.round(S.oatC);
-  H.wind.textContent = (S.windKt >= 0 ? '+' : '−') + group(Math.abs(S.windKt));
+  const kmh = S.gs * 3.6, km = S.alt / 1000;
+  H.gs.textContent = group(kmh);
+  H.alt.textContent = km.toFixed(1);
+  H.oat.textContent = (S.oatC >= 0 ? '+' : '−') + Math.abs(Math.round(S.oatC));
+  H.wind.textContent = (S.windKt >= 0 ? '+' : '−') + group(Math.abs(S.windKt * 1.852));
+  H.gscap.textContent = speedCaption(kmh);
+  H.altcap.textContent = altCaption(km);
+  H.oatcap.textContent = oatCaption(S.oatC);
+  H.windcap.textContent = windCaption(S.windKt * 1.852);
+  H.narr.innerHTML = narrator();
+  H.pro.textContent = group(S.gs * MS2KT) + ' kt · M ' + S.mach.toFixed(2) + ' · FL' +
+    Math.round(S.alt * M2FT / 100) + ' · ' + (S.vs >= 0 ? '+' : '−') + group(Math.abs(S.vs * MS2FPM)) + ' fpm';
 }
 
 function updateStatus() {

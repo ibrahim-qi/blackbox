@@ -1,5 +1,5 @@
 /* blackbox service worker — cache-first, works in airplane mode */
-const CACHE = 'blackbox-v1';
+const CACHE = 'blackbox-v2';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.json'];
 
 self.addEventListener('install', e => {
