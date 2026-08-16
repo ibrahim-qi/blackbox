@@ -26,6 +26,7 @@ const S = {
   attWord: '',             // what the plane is doing, in words
   heading: 0,              // rad, true north clockwise
   view: 'dial',            // dial | 3d
+  trafficN: 0,             // flights visible in the demo sky
   mach: 0, oatC: 15, windKt: 0,
   lat: null, lng: null, fix: false, fixAcc: null,
   samples: [], altHist: [], maxAlt: 0, maxGs: 0, startedAt: null
@@ -273,6 +274,59 @@ const DEMO_CITIES = [
   ['seville', 37.3891, -5.9845]
 ];
 
+/* local tangent plane: metres east/north of the anchor point */
+const toXY = (lat, lng) => {
+  const lat0 = S.mode === 'demo' ? LON.lat : S.lat, lng0 = S.mode === 'demo' ? LON.lng : S.lng;
+  return [(lng - lng0) * Math.cos(lat0 * Math.PI / 180) * 111320, (lat - lat0) * 110540];
+};
+
+/* baked sky — typical traffic on the corridor, clearly not live */
+const TRAFFIC = [
+  { cs: 'EZY8342', a: [48.9, 2.2], b: [41.2, -3.1], alt: 11800, gs: 235, t0: 0.02 },
+  { cs: 'RYR6134', a: [47.2, -0.5], b: [39.9, -4.8], alt: 11300, gs: 240, t0: 0.10 },
+  { cs: 'BAW485', a: [50.3, 0.5], b: [38.5, -5.9], alt: 12000, gs: 250, t0: 0.22 },
+  { cs: 'IBE3192', a: [40.4, -5.0], b: [49.5, 1.0], alt: 11600, gs: 245, t0: 0.35 },
+  { cs: 'VLG7241', a: [38.8, -6.2], b: [47.0, -1.5], alt: 10900, gs: 230, t0: 0.50 },
+  { cs: 'EXS530', a: [45.5, 1.5], b: [39.0, -4.2], alt: 12400, gs: 255, t0: 0.65 },
+  { cs: 'AEA1045', a: [42.0, -3.5], b: [49.0, 2.0], alt: 11500, gs: 240, t0: 0.80 },
+  { cs: 'WZZ8022', a: [44.5, -2.0], b: [38.2, -6.4], alt: 11200, gs: 235, t0: 0.92 }
+];
+
+function trafficPos(fl, t) {
+  const elapsed = (t - fl.t0 * DEMO_T) * 30;      // 1 demo s = 30 real s
+  if (elapsed < 0) return null;
+  const a = toXY(fl.a[0], fl.a[1]), b = toXY(fl.b[0], fl.b[1]);
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const f = clamp(elapsed * fl.gs / len, 0, 1);
+  if (f >= 1) return null;
+  return { x: a[0] + (b[0] - a[0]) * f, y: a[1] + (b[1] - a[1]) * f, alt: fl.alt, cs: fl.cs };
+}
+
+let lastTrafficSaid = 0;
+function nearTrafficString() {
+  if (S.mode !== 'demo') return '';
+  const now = performance.now();
+  if (now - lastTrafficSaid < 45000) return '';
+  const t = S.flightT;
+  const psi = bearing(demoStep(Math.max(0, t - 0.5)), demoStep(t + 0.5));
+  const fw = [Math.sin(psi), Math.cos(psi)];
+  const p0 = toXY(S.lat, S.lng);
+  let best = null;
+  for (const fl of TRAFFIC) {
+    const q = trafficPos(fl, t);
+    if (!q) continue;
+    const d = Math.hypot(q.x - p0[0], q.y - p0[1]);
+    if (d < 15000 && (!best || d < best.d)) best = { d, q };
+  }
+  if (!best) return '';
+  const dx = best.q.x - p0[0], dy = best.q.y - p0[1];
+  const side = fw[0] * dy - fw[1] * dx > 0 ? 'left' : 'right';
+  const rel = Math.round(best.q.alt - S.alt);
+  lastTrafficSaid = now;
+  return 'Another plane passes ' + Math.round(best.d / 1000) + ' km to our ' + side +
+    (Math.abs(rel) > 300 ? (rel > 0 ? ', ' + group(Math.abs(rel)) + ' m above' : ', ' + group(Math.abs(rel)) + ' m below') : '') + '. ';
+}
+
 const norm3 = v => { const m = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / m, v[1] / m, v[2] / m]; };
 const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
@@ -291,9 +345,6 @@ function draw3D() {
   const ctx = cv.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, w, h);
-
-  const lat0 = S.mode === 'demo' ? LON.lat : S.lat, lng0 = S.mode === 'demo' ? LON.lng : S.lng;
-  const toXY = (lat, lng) => [(lng - lng0) * Math.cos(lat0 * Math.PI / 180) * 111320, (lat - lat0) * 110540];
 
   let psi;
   if (S.mode === 'demo') psi = bearing(demoStep(Math.max(0, S.flightT - 0.5)), demoStep(S.flightT + 0.5));
@@ -353,7 +404,28 @@ function draw3D() {
       ctx.fillStyle = 'rgba(230,225,214,.4)'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
       ctx.fillText(name.toUpperCase(), s[0] + 5, s[1] - 3);
     }
-  }
+
+    /* typical traffic — small dots, amber when close */
+    const t = S.flightT;
+    let n = 0;
+    for (const fl of TRAFFIC) {
+      const q = trafficPos(fl, t);
+      if (!q) continue;
+      n++;
+      const s = toScr([q.x, q.y, q.alt]);
+      if (!s) continue;
+      if (Math.abs(s[0] - cx) > w * .75 || Math.abs(s[1] - cy) > h * .75) continue;
+      const hd = Math.hypot(q.x - p0[0], q.y - p0[1]);
+      const near = hd < 20000;
+      ctx.fillStyle = near ? 'rgba(255,180,84,.9)' : 'rgba(230,225,214,.4)';
+      ctx.beginPath(); ctx.arc(s[0], s[1], near ? 2 : 1.2, 0, 7); ctx.fill();
+      ctx.fillStyle = near ? 'rgba(255,180,84,.7)' : 'rgba(230,225,214,.28)';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+      const rel = Math.round(q.alt - S.alt);
+      ctx.fillText(q.cs + (near ? ' · ' + (rel >= 0 ? '+' : '−') + Math.abs(rel) + ' m' : ''), s[0] + 4, s[1] - 3);
+    }
+    S.trafficN = n;
+  } else S.trafficN = 0;
 
   /* altitude hairline down to the ground */
   const ga = toScr(P), gb = toScr([P[0], P[1], 0]);
@@ -443,29 +515,29 @@ function windCaption(kmh) {
 }
 
 function narrator() {
+  const near = nearTrafficString();
   const kmh = S.gs * 3.6, km = S.alt / 1000;
+  let s;
   if (S.mode === 'demo' || S.mode === 'flying') {
     if (S.alt < 20) {
-      if (S.vs > 1) return 'Wheels up.';
-      if (kmh < 30) return S.flightT > 60 ? 'Touched down — welcome to Seville.' : 'Lined up on the runway — here we go.';
-      return 'Rolling down the runway at <b>' + Math.round(kmh) + ' km/h</b>.';
-    }
-    if (Math.abs(S.roll) > 10 && km > 8)
-      return 'Banking ' + (S.roll > 0 ? 'right' : 'left') + ' — a turn in the flight path.';
-    if (S.vs > 3)
-      return 'Climbing through <b>' + km.toFixed(1) + ' km</b> — outside it’s <b>−' + Math.abs(Math.round(S.oatC)) + '°C</b>.';
-    if (S.vs < -3)
-      return 'Descending through ' + km.toFixed(1) + ' km — on the ground in about ' +
+      if (S.vs > 1) s = 'Wheels up.';
+      else if (kmh < 30) s = S.flightT > 60 ? 'Touched down — welcome to Seville.' : 'Lined up on the runway — here we go.';
+      else s = 'Rolling down the runway at <b>' + Math.round(kmh) + ' km/h</b>.';
+    } else if (Math.abs(S.roll) > 10 && km > 8) {
+      s = 'Banking ' + (S.roll > 0 ? 'right' : 'left') + ' — a turn in the flight path.';
+    } else if (S.vs > 3) {
+      s = 'Climbing through <b>' + km.toFixed(1) + ' km</b> — outside it’s <b>−' + Math.abs(Math.round(S.oatC)) + '°C</b>.';
+    } else if (S.vs < -3) {
+      s = 'Descending through ' + km.toFixed(1) + ' km — on the ground in about ' +
         (S.mode === 'demo' ? fmtEta(DEMO_T - S.flightT) : '15 minutes') + '.';
-    if (km > 8) {
-      let s = 'Cruising at <b>' + km.toFixed(1) + ' km</b>, ' + Math.round(kmh) + ' km/h — ' +
+    } else if (km > 8) {
+      s = 'Cruising at <b>' + km.toFixed(1) + ' km</b>, ' + Math.round(kmh) + ' km/h — ' +
         Math.round(S.mach * 100) + '% the speed of sound.';
       if (S.windKt > 15) s += ' Tailwind pushing us along.';
       else if (S.windKt < -15) s += ' Headwind slowing us down.';
       if (S.mode === 'demo') s += ' Seville in ' + fmtEta(DEMO_T - S.flightT) + '.';
-      return s;
-    }
-    return 'Settling into the climb.';
+    } else s = 'Settling into the climb.';
+    return near + s;
   }
   if (S.mode === 'armed') return S.fix ? 'GPS locked — waiting for takeoff.' : 'Looking for GPS — keep me near a window.';
   return '';
@@ -490,7 +562,8 @@ function updateHUD() {
   else S.attWord = 'level flight';
   H.pro.textContent = (S.mode === 'demo' ? 'simulated · ' : '') + 'pilot units · ' +
     group(S.gs * MS2KT) + ' kt · M ' + S.mach.toFixed(2) + ' · FL' +
-    Math.round(S.alt * M2FT / 100) + ' · ' + (S.vs >= 0 ? '+' : '−') + group(Math.abs(S.vs * MS2FPM)) + ' fpm';
+    Math.round(S.alt * M2FT / 100) + ' · ' + (S.vs >= 0 ? '+' : '−') + group(Math.abs(S.vs * MS2FPM)) + ' fpm' +
+    (S.mode === 'demo' && S.trafficN ? ' · traffic ' + S.trafficN + ' · typical' : '');
 }
 
 function updateStatus() {
