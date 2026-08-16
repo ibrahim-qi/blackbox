@@ -690,8 +690,17 @@ function draw3D() {
   /* earth + grid follow the plane */
   GL.ground.position.set(P.x, 0, P.z);
 
-  /* cinematic chase cam — behind and above, softly damped */
-  const D = S.camD || 65, CH = S.camH || 20, LT = S.camL || 0;
+  /* cinematic chase cam — behind and above, softly damped.
+     The fov adapts to the window shape: the plane stays a hero in any aspect —
+     half the canvas height on a phone, a full letterbox strip on a wide window. */
+  const D = S.camD || 68, CH = S.camH || 20, LT = S.camL || 0;
+  const Wpx = cv.clientWidth, Hpx = cv.clientHeight;
+  let planePx = 0.5 * Hpx;
+  if (planePx < 0.3 * Wpx) planePx = Math.min(0.3 * Wpx, Hpx * 0.92);
+  const focalY = planePx * D / 37;                       // 37 m = the plane's length
+  const fovDeg = 2 * Math.atan((Hpx / 2) / focalY) * 180 / Math.PI;
+  if (Math.abs(cam.fov - fovDeg) > 0.1) { cam.fov = fovDeg; cam.updateProjectionMatrix(); }
+
   const eye = new THREE.Vector3(P.x - fw[0] * D, P.y + CH, P.z - fw[1] * D);
   if (!GL.cam || GL.cam.distanceTo(eye) > 2000) GL.cam = eye.clone();   // snap on big jumps
   else GL.cam.lerp(eye, .14);
