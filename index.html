@@ -27,12 +27,24 @@
 <div class="note">auto-lock &rarr; never &middot; window seat &middot; phone flat &middot; keep open</div>
 <div id="overlay">
   <h1>black<span>box</span></h1>
-  <div class="sub" id="osub">EZY2899 &middot; BRISTOL &rarr; SEVILLE &middot; AIRBUS A320 &middot; DEP 16:40 &middot; works entirely offline &mdash; gps, gyros and maths only &middot; v6</div>
+  <div class="sub" id="osub">EZY2899 &middot; BRISTOL &rarr; SEVILLE &middot; AIRBUS A320 &middot; DEP <span id="deptime" class="tap">16:40</span> &middot; works entirely offline &mdash; gps, gyros and maths only &middot; v8</div>
   <div class="btns">
     <button class="primary" id="start">start flight</button>
     <button id="demo">watch a demo</button>
+    <button id="vreport">view report</button>
     <button id="reset">reset</button>
   </div>
+</div>
+<div id="report">
+  <div class="rhead">
+    <div class="rmode">flight report</div>
+    <div class="rflight" id="rflight">—</div>
+  </div>
+  <canvas id="rtrack"></canvas>
+  <div class="rstats" id="rstats">—</div>
+  <canvas id="rprofile"></canvas>
+  <div class="rstats" id="rstats2">—</div>
+  <button class="primary" id="rclose">close</button>
 </div>
 <script src="three.min.js"></script>
 <script src="app.js"></script>

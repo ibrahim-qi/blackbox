@@ -12,7 +12,10 @@ const H = {
   gscap: $('gscap'), altcap: $('altcap'), oatcap: $('oatcap'), windcap: $('windcap'),
   narr: $('narr'),
   gl: $('gl'),
-  overlay: $('overlay'), osub: $('osub'), start: $('start'), demo: $('demo'), reset: $('reset')
+  overlay: $('overlay'), osub: $('osub'), start: $('start'), demo: $('demo'),
+  reset: $('reset'), vreport: $('vreport'), deptime: $('deptime'),
+  report: $('report'), rflight: $('rflight'), rstats: $('rstats'), rstats2: $('rstats2'),
+  rtrack: $('rtrack'), rprofile: $('rprofile'), rclose: $('rclose')
 };
 
 /* ---------------- state ---------------- */
@@ -46,10 +49,17 @@ function isa(altM) {
 const DEMO_T = 301;
 const BRS = { lat: 51.3827, lng: -2.7191 }, SVQ = { lat: 37.418, lng: -5.8988 };
 /* the real flight — update dep/durMin from the boarding pass if they differ */
-const FLIGHT = { cs: 'EZY2899', from: 'BRS', to: 'SVQ', aircraft: 'A320', dep: '16:40', durMin: 140 };
+const FLIGHT = { cs: 'EZY2899', from: 'BRS', to: 'SVQ', aircraft: 'A320', dep: '16:40', durMin: 148 };
+const DEP_TIMES = ['15:35', '16:40', '17:35'];   // tap the start screen to adjust
+
+/* restore a tapped departure time */
+try {
+  const d = localStorage.getItem('bb_dep');
+  if (DEP_TIMES.includes(d)) FLIGHT.dep = d;
+} catch (e) {}
 
 function liveEta() {
-  const dep = new Date('2026-08-18T16:40:00+01:00').getTime();   // 16:40 BST
+  const dep = new Date('2026-08-18T' + FLIGHT.dep + ':00+01:00').getTime();   // BST
   return Math.max(0, (dep + FLIGHT.durMin * 60000 - Date.now()) / 1000);
 }
 
@@ -119,8 +129,51 @@ window.addEventListener('devicemotion', e => {
       FUSE.roll = .98 * FUSE.roll + .02 * rA;
     }
   }
-  if (S.mode === 'flying' || S.mode === 'armed') { S.pitch = FUSE.pitch; S.roll = FUSE.roll; }
+  if (S.mode === 'flying' || S.mode === 'armed') {
+    S.pitch = pitchSign * FUSE.pitch;
+    S.roll = rollSign * FUSE.roll;
+  }
 });
+
+/* ---------------- self-calibrating attitude ----------------
+   If a device reports inverted sensors, sustained physical evidence
+   flips the signs automatically and remembers the choice. */
+let pitchSign = 1, rollSign = 1;
+try {
+  pitchSign = parseInt(localStorage.getItem('bb_sign_p') || '1') || 1;
+  rollSign = parseInt(localStorage.getItem('bb_sign_r') || '1') || 1;
+} catch (e) {}
+
+let pitchEv = 0, rollEv = 0, lastHdg = null, lastHdgT = 0;
+
+function attitudeCalibrate() {
+  if (S.mode !== 'flying') return;
+  /* pitch: a sustained climb must read as positive pitch */
+  if (S.vs > 3 && Math.abs(FUSE.pitch) > 5) pitchEv++; else pitchEv = 0;
+  if (pitchEv > 15 && FUSE.pitch * pitchSign < 0) {
+    pitchSign = -pitchSign;
+    try { localStorage.setItem('bb_sign_p', String(pitchSign)); } catch (e) {}
+    pitchEv = 0;
+  }
+  /* roll: the bank direction must match the turn direction */
+  const now = performance.now();
+  if (lastHdg != null && S.heading != null) {
+    let d = S.heading - lastHdg;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    const dt = (now - lastHdgT) / 1000;
+    if (dt > 0 && dt < 5 && Math.abs(d) / dt > 0.008 && Math.abs(FUSE.roll) > 5) {
+      if (Math.sign(d) !== Math.sign(FUSE.roll * rollSign)) rollEv++;
+      else rollEv = Math.max(0, rollEv - 1);
+      if (rollEv > 8) {
+        rollSign = -rollSign;
+        try { localStorage.setItem('bb_sign_r', String(rollSign)); } catch (e) {}
+        rollEv = 0;
+      }
+    }
+  }
+  lastHdg = S.heading; lastHdgT = now;
+}
 
 function armGPS() {
   navigator.geolocation.watchPosition(p => {
@@ -203,11 +256,110 @@ function tick() {
     if (S.mode === 'flying') {
       S.flightT += 1;
       recordSample();
+      attitudeCalibrate();
       if (S.flightT > 60 && S.gs * MS2KT < 25 && S.alt < 150) land();
     }
   }
 }
 setInterval(tick, 1000);
+
+/* ---------------- flight report ---------------- */
+function drawReportTrack(samples) {
+  const cv = H.rtrack, dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h || samples.length < 2) return;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#070706'; ctx.fillRect(0, 0, w, h);
+  let mnLat = 90, mxLat = -90, mnLng = 180, mxLng = -180;
+  for (const s of samples) {
+    if (s.lat == null) continue;
+    mnLat = Math.min(mnLat, s.lat); mxLat = Math.max(mxLat, s.lat);
+    mnLng = Math.min(mnLng, s.lng); mxLng = Math.max(mxLng, s.lng);
+  }
+  const pad = 24;
+  const sc = Math.min((w - pad * 2) / Math.max(mxLng - mnLng, .001), (h - pad * 2) / Math.max(mxLat - mnLat, .001));
+  const X = lng => (lng - mnLng) * sc + pad + (w - pad * 2 - (mxLng - mnLng) * sc) / 2;
+  const Y = lat => h - pad - (lat - mnLat) * sc;
+  ctx.strokeStyle = 'rgba(255,180,84,.9)'; ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  let st = false;
+  for (const s of samples) {
+    if (s.lat == null) { st = false; continue; }
+    const x = X(s.lng), y = Y(s.lat);
+    if (!st) { ctx.moveTo(x, y); st = true; } else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  const a = samples[0], b = samples[samples.length - 1];
+  ctx.fillStyle = '#e6e1d6'; ctx.font = '10px ui-monospace,Menlo,monospace';
+  ctx.fillStyle = '#5c574e';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+  ctx.fillText(FLIGHT.from, X(a.lng) + 5, Y(a.lat) - 3);
+  ctx.textAlign = 'right';
+  ctx.fillText(FLIGHT.to, X(b.lng) - 5, Y(b.lat) - 3);
+  ctx.fillStyle = '#e6e1d6';
+  ctx.beginPath(); ctx.arc(X(a.lng), Y(a.lat), 2, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(X(b.lng), Y(b.lat), 2, 0, 7); ctx.fill();
+}
+
+function drawReportProfile(samples) {
+  const cv = H.rprofile, dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h || samples.length < 2) return;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  let mn = 1e9, mx = -1e9;
+  for (const s of samples) { mn = Math.min(mn, s.alt); mx = Math.max(mx, s.alt); }
+  const span = (mx - mn) || 1;
+  ctx.strokeStyle = 'rgba(255,180,84,.85)'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 0; i < samples.length; i++) {
+    const x = (i / (samples.length - 1)) * (w - 8) + 4;
+    const y = h - 8 - ((samples[i].alt - mn) / span) * (h - 16);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#5c574e'; ctx.font = '8px ui-monospace,Menlo,monospace';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+  ctx.fillText('your climb & descent', w - 4, 4);
+}
+
+function renderReport() {
+  let samples = S.samples;
+  if (!samples.length) {
+    try { samples = JSON.parse(localStorage.getItem('blackbox_log') || '{"samples":[]}').samples; } catch (e) { samples = []; }
+  }
+  if (samples.length < 2) return;
+  const dur = samples[samples.length - 1].t;
+  let maxAlt = 0, maxGs = 0, maxWind = -1e9, maxAltT = 0, touchdown = null;
+  for (const s of samples) {
+    if (s.alt > maxAlt) { maxAlt = s.alt; maxAltT = s.t; }
+    if (s.gs > maxGs) maxGs = s.gs;
+    if (s.wind > maxWind) maxWind = s.wind;
+  }
+  for (const s of samples) {
+    if (s.t > maxAltT && s.alt < 50) { touchdown = s.t; break; }
+  }
+  const passed = [];
+  for (const c of DEMO_CITIES) {
+    if (samples.some(s => s.lat != null &&
+        Math.abs(s.lat - c[1]) * 110.54 < 40 &&
+        Math.abs(s.lng - c[2]) * 111.32 * Math.cos(c[1] * Math.PI / 180) < 40))
+      passed.push(c[0]);
+  }
+  H.report.style.display = 'flex';
+  H.rflight.textContent = FLIGHT.cs + ' · ' + FLIGHT.from + ' → ' + FLIGHT.to + ' · ' + samples.length + ' samples';
+  H.rstats.innerHTML = 'in the air <b>' + fmtT(dur) + '</b> · highest <b>' + (maxAlt / 1000).toFixed(1) + ' km</b> · fastest <b>' +
+    group(maxGs * 3.6) + ' km/h</b>' +
+    (maxWind > 0 ? ' · best tailwind <b>+' + group(maxWind * 1.852) + ' km/h</b>' : '') +
+    (touchdown != null ? ' · touchdown at <b>T+' + fmtT(touchdown) + '</b>' : '');
+  H.rstats2.textContent = passed.length ? 'you flew over ' + passed.join(' · ') : '';
+  drawReportTrack(samples);
+  drawReportProfile(samples);
+}
 
 /* ---------------- render ---------------- */
 
@@ -666,6 +818,7 @@ function showOverlay(title, sub, resetOnly) {
   H.start.style.display = resetOnly ? 'none' : '';
   H.demo.style.display = resetOnly ? 'none' : '';
   H.reset.style.display = resetOnly ? '' : 'none';
+  H.vreport.style.display = resetOnly ? '' : 'none';
 }
 
 H.demo.onclick = () => {
@@ -688,6 +841,17 @@ H.start.onclick = async () => {
 
 H.reset.onclick = () => location.reload();
 
+H.vreport.onclick = () => { H.overlay.style.display = 'none'; renderReport(); };
+H.rclose.onclick = () => location.reload();
+
+H.deptime.onclick = () => {
+  const i = DEP_TIMES.indexOf(FLIGHT.dep);
+  FLIGHT.dep = DEP_TIMES[(i + 1) % DEP_TIMES.length];
+  try { localStorage.setItem('bb_dep', FLIGHT.dep); } catch (e) {}
+  H.deptime.textContent = FLIGHT.dep;
+};
+H.deptime.textContent = FLIGHT.dep;
+
 /* ---------------- offline ---------------- */
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
   navigator.serviceWorker.register('sw.js').catch(() => {});
@@ -695,7 +859,7 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
 /* test hook — ?demo=1&t=120 opens the demo at that moment */
 (function () {
   const q = new URLSearchParams(location.search);
-  if (!q.get('demo') && !q.get('live') && !q.get('landtest')) return;
+  if (!q.get('demo') && !q.get('live') && !q.get('landtest') && !q.get('report') && !q.get('signtest')) return;
   S.camD = parseFloat(q.get('cam') || '0') || null;
   S.camH = parseFloat(q.get('ch') || '0') || null;
   S.camL = parseFloat(q.get('lt') || '0') || null;
@@ -737,6 +901,31 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
     S.maxGs = 470;
     S.samples = Array(100).fill(1);
     land();
+  }
+  if (q.get('report')) {
+    /* a full synthetic flight → render the report for verification */
+    S.samples = [];
+    for (let i = 0; i <= 300; i++) {
+      const o = demoStep(i);
+      S.samples.push({ t: i, lat: o.lat, lng: o.lng, alt: o.alt, gs: o.gs, vs: o.vs, wind: o.windKt, pitch: o.pitch, roll: o.roll });
+    }
+    S.maxAlt = 10668; S.maxGs = 265;
+    hideOverlay();
+    renderReport();
+  }
+  if (q.get('signtest')) {
+    /* inverted sensors → the calibrator must flip both signs */
+    S.mode = 'flying'; S.vs = 10; FUSE.pitch = -8;
+    const realNow = performance.now;
+    let vt = 0;
+    performance.now = () => ++vt * 1000;      // one virtual second per call
+    try {
+      for (let i = 0; i < 20; i++) attitudeCalibrate();
+      const pAfter = pitchSign;
+      FUSE.roll = -10; FUSE.pitch = 0; lastHdg = null; S.heading = 0;
+      for (let i = 0; i < 20; i++) { S.heading += 0.02; attitudeCalibrate(); }
+      console.log('SIGNS pitch', pAfter, '->', pitchSign, '| roll ->', rollSign);
+    } finally { performance.now = realNow; }
   }
   if (q.get('live')) {
     /* synthetic gps along the real route, compressed — exercises the whole
