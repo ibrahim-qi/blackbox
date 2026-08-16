@@ -46,6 +46,7 @@ header { display: flex; justify-content: space-between; align-items: baseline; g
 }
 .narr b { color: var(--accent); font-weight: 500; }
 .note { font-size: 9px; letter-spacing: .14em; color: var(--faint); text-align: center; text-transform: uppercase; }
+.attr { position: fixed; bottom: 6px; right: 12px; font-size: 8px; letter-spacing: .06em; color: var(--faint); z-index: 5; }
 #overlay {
   position: fixed; inset: 0; z-index: 10; background: var(--bg);
   display: flex; flex-direction: column; align-items: center; justify-content: center;

@@ -532,6 +532,59 @@ function buildPlane() {
 }
 
 let GL = null;
+const pendingTiles = [];
+let tilePending = 0;
+
+function doShot() {
+  try {
+    const url = H.gl.toDataURL('image/png');
+    const img = document.createElement('img');
+    img.id = 'shotout';
+    img.src = url;
+    img.style.display = 'none';
+    console.log('SHOT ready len', url.length);
+  } catch (e) { console.log('SHOT err', e.message); }
+}
+
+/* real earth — cached carto dark tiles along the corridor */
+function tileBounds(z, x, y) {
+  const n = 2 ** z;
+  const w = x / n * 360 - 180, e = (x + 1) / n * 360 - 180;
+  const s = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))) * 180 / Math.PI;
+  const n2 = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) * 180 / Math.PI;
+  return { s, n: n2, w, e };
+}
+
+function addTile(t) {
+  if (!GL) { pendingTiles.push(t); return; }
+  const b = tileBounds(t.z, t.x, t.y);
+  const a = toXY(b.n, b.w), c = toXY(b.s, b.e);
+  const w = Math.abs(c[0] - a[0]), h = Math.abs(c[1] - a[1]);
+  const img = new Image();
+  tilePending++;
+  img.onload = () => {
+    tilePending--;
+    if (!GL) return;
+    const tex = new THREE.Texture(img);
+    tex.encoding = THREE.sRGBEncoding;      // r147 api
+    tex.needsUpdate = true;
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ map: tex })
+    );
+    m.geometry.rotateX(-Math.PI / 2);
+    m.position.set((a[0] + c[0]) / 2, 0.5, -(a[1] + c[1]) / 2);
+    GL.scene.add(m);
+    if (tilePending === 0 && S.shotWait) { draw3D(); doShot(); }
+  };
+  img.onerror = () => {
+    tilePending--;
+    if (tilePending === 0 && S.shotWait) { draw3D(); doShot(); }
+  };
+  img.src = 'tiles/' + t.z + '/' + t.x + '/' + t.y + '.png';
+}
+
+(window.BLACKBOX_TILES || []).forEach(t => addTile(t));
 
 function glInit() {
   const cv = H.gl;
@@ -563,9 +616,6 @@ function glInit() {
   ground.rotation.x = -Math.PI / 2;
   ground.frustumCulled = false;
   scene.add(ground);
-  const grid = new THREE.GridHelper(24000, 24, 0x3a332a, 0x2e2920);
-  grid.position.y = 1;                       // above the disc — no z-fighting
-  scene.add(grid);
 
   if (!S.clean) {
     /* planned route, always visible */
@@ -614,7 +664,8 @@ function glInit() {
   );
   scene.add(hair);
 
-  GL = { renderer, scene, camera, plane, ground, grid, dots, labs, hair, cam: null, sun };
+  GL = { renderer, scene, camera, plane, ground, dots, labs, hair, cam: null, sun };
+  pendingTiles.splice(0).forEach(t => addTile(t));
   return true;
 }
 
@@ -646,13 +697,12 @@ function draw3D() {
 
   /* earth + grid follow the plane */
   GL.ground.position.set(P.x, 0, P.z);
-  GL.grid.position.set(P.x, 1, P.z);
 
   /* cinematic chase cam — behind and above, softly damped */
-  const D = S.camD || 130, CH = S.camH || 55, LT = S.camL || 0;
+  const D = S.camD || 100, CH = S.camH || 42, LT = S.camL || 0;
   const eye = new THREE.Vector3(P.x - fw[0] * D, P.y + CH, P.z - fw[1] * D);
-  if (!GL.cam) GL.cam = eye.clone();
-  GL.cam.lerp(eye, .14);
+  if (!GL.cam || GL.cam.distanceTo(eye) > 2000) GL.cam = eye.clone();   // snap on big jumps
+  else GL.cam.lerp(eye, .14);
   cam.position.copy(GL.cam);
   cam.lookAt(P.x + fw[0] * LT, P.y, P.z + fw[1] * LT);
 
@@ -863,7 +913,7 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
 /* test hook — ?demo=1&t=120 opens the demo at that moment */
 (function () {
   const q = new URLSearchParams(location.search);
-  if (!q.get('demo') && !q.get('live') && !q.get('landtest') && !q.get('report') && !q.get('signtest')) return;
+  if (!q.get('demo') && !q.get('live') && !q.get('landtest') && !q.get('report') && !q.get('signtest') && !q.get('tilecheck')) return;
   S.camD = parseFloat(q.get('cam') || '0') || null;
   S.camH = parseFloat(q.get('ch') || '0') || null;
   S.camL = parseFloat(q.get('lt') || '0') || null;
@@ -886,16 +936,9 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
     updateHUD(); updateStatus();
   }
   if (q.get('shot')) {
-    try {
-      glInit(); draw3D();
-      const url = H.gl.toDataURL('image/png');
-      const img = document.createElement('img');
-      img.id = 'shotout';
-      img.src = url;
-      img.style.display = 'none';
-      document.body.appendChild(img);
-      console.log('SHOT ready len', url.length);
-    } catch (e) { console.log('SHOT err', e.message); }
+    glInit(); draw3D();
+    if (q.get('shotwait')) S.shotWait = true;   // tiles load async — shoot when they land
+    else doShot();
   }
   if (q.get('landtest')) {
     /* simulate a finished flight and verify the complete overlay */
@@ -905,6 +948,19 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
     S.maxGs = 470;
     S.samples = Array(100).fill(1);
     land();
+  }
+  if (q.get('tilecheck')) {
+    /* draw a downloaded earth tile into a 2d canvas — visible in plain screenshots */
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.createElement('canvas');
+      cv.id = 'tileout'; cv.width = 256; cv.height = 256;
+      cv.style.cssText = 'position:fixed;left:0;top:0;z-index:99;';
+      cv.getContext('2d').drawImage(img, 0, 0);
+      document.body.appendChild(cv);
+    };
+    img.onerror = () => { console.log('TILECHECK err'); };
+    img.src = 'tiles/8/126/92.png';
   }
   if (q.get('report')) {
     /* a full synthetic flight → render the report for verification */
