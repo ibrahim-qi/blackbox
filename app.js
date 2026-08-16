@@ -532,7 +532,6 @@ function buildPlane() {
 }
 
 let GL = null;
-const pendingTiles = [];
 let tilePending = 0;
 
 function doShot() {
@@ -541,7 +540,10 @@ function doShot() {
     const img = document.createElement('img');
     img.id = 'shotout';
     img.src = url;
-    img.style.display = 'none';
+    img.style.cssText = S.shotVis
+      ? 'position:fixed;left:0;top:0;z-index:99;width:' + H.gl.clientWidth + 'px;'
+      : 'display:none;';
+    document.body.appendChild(img);
     console.log('SHOT ready len', url.length);
   } catch (e) { console.log('SHOT err', e.message); }
 }
@@ -556,7 +558,6 @@ function tileBounds(z, x, y) {
 }
 
 function addTile(t) {
-  if (!GL) { pendingTiles.push(t); return; }
   const b = tileBounds(t.z, t.x, t.y);
   const a = toXY(b.n, b.w), c = toXY(b.s, b.e);
   const w = Math.abs(c[0] - a[0]), h = Math.abs(c[1] - a[1]);
@@ -575,16 +576,14 @@ function addTile(t) {
     m.geometry.rotateX(-Math.PI / 2);
     m.position.set((a[0] + c[0]) / 2, 0.5, -(a[1] + c[1]) / 2);
     GL.scene.add(m);
-    if (tilePending === 0 && S.shotWait) { draw3D(); doShot(); }
+    if (tilePending === 0 && S.shotWait) { GL.cam = null; draw3D(); doShot(); }
   };
   img.onerror = () => {
     tilePending--;
-    if (tilePending === 0 && S.shotWait) { draw3D(); doShot(); }
+    if (tilePending === 0 && S.shotWait) { GL.cam = null; draw3D(); doShot(); }
   };
   img.src = 'tiles/' + t.z + '/' + t.x + '/' + t.y + '.png';
 }
-
-(window.BLACKBOX_TILES || []).forEach(t => addTile(t));
 
 function glInit() {
   const cv = H.gl;
@@ -665,7 +664,7 @@ function glInit() {
   scene.add(hair);
 
   GL = { renderer, scene, camera, plane, ground, dots, labs, hair, cam: null, sun };
-  pendingTiles.splice(0).forEach(t => addTile(t));
+  (window.BLACKBOX_TILES || []).slice(0, S.tileMax < 0 ? 1e9 : S.tileMax).forEach(t => addTile(t));
   return true;
 }
 
@@ -921,6 +920,8 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
   S.noFog = !!q.get('nofog');
   S.groundRed = !!q.get('groundred');
   S.discR = parseFloat(q.get('discr') || '0') || null;
+  S.tileMax = q.get('tilemax') == null ? -1 : parseInt(q.get('tilemax'));
+  S.shotVis = !!q.get('shotvis');
   const hq = parseFloat(q.get('h') || '0');
   if (hq) { H.gl.style.height = hq + 'px'; H.gl.style.flex = 'none'; }
   if (q.get('test')) document.body.style.background = 'rgb(200,0,0)';
@@ -937,8 +938,10 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
   }
   if (q.get('shot')) {
     glInit(); draw3D();
-    if (q.get('shotwait')) S.shotWait = true;   // tiles load async — shoot when they land
-    else doShot();
+    if (q.get('shotwait')) {
+      S.shotWait = true;   // tiles load async — shoot when they land
+      if (!(S.tileMax > 0)) setTimeout(() => { GL.cam = null; draw3D(); doShot(); }, 3000);
+    } else doShot();
   }
   if (q.get('landtest')) {
     /* simulate a finished flight and verify the complete overlay */
