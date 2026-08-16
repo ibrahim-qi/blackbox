@@ -12,7 +12,7 @@ const H = {
   gscap: $('gscap'), altcap: $('altcap'), oatcap: $('oatcap'), windcap: $('windcap'),
   narr: $('narr'),
   vdial: $('vdial'), v3d: $('v3d'),
-  horizon: $('horizon'), profile: $('profile'),
+  horizon: $('horizon'), gl: $('gl'), profile: $('profile'),
   overlay: $('overlay'), osub: $('osub'), start: $('start'), demo: $('demo'), reset: $('reset')
 };
 
@@ -355,124 +355,228 @@ function bearing(a, b) {
   return Math.atan2(y, x);
 }
 
+/* text sprite from a canvas — labels that live in the 3d world */
+function makeLabel(text, scale) {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 128;
+  const x = c.getContext('2d');
+  x.font = '30px ui-monospace, Menlo, Consolas, monospace';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillStyle = 'rgba(230,225,214,.6)';
+  x.fillText(text.toUpperCase(), 256, 62);
+  const tex = new THREE.CanvasTexture(c);
+  tex.minFilter = THREE.LinearFilter;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  sp.scale.set(scale || 3600, (scale || 3600) / 4, 1);
+  return sp;
+}
+
+/* the plane — a low-poly a320 built from geometry, nose +Z, wings ±X, up +Y */
+function buildPlane() {
+  const g = new THREE.Group();
+  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x26272b, flatShading: true, side: THREE.DoubleSide });
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0xffb454, transparent: true, opacity: .5 });
+
+  const add = (geo, x, y, z, rx, ry, rz) => {
+    const grp = new THREE.Group();
+    grp.add(new THREE.Mesh(geo, bodyMat));
+    grp.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), edgeMat.clone()));
+    grp.position.set(x, y, z);
+    if (rx) grp.rotation.x = rx;
+    if (ry) grp.rotation.y = ry;
+    if (rz) grp.rotation.z = rz;
+    g.add(grp);
+    return grp;
+  };
+
+  /* fuselage: tube, nose cone, tail taper */
+  add(new THREE.CylinderGeometry(1.9, 1.9, 26, 12), 0, 0, 2, Math.PI / 2);
+  add(new THREE.ConeGeometry(1.9, 7, 12), 0, 0, 16.5, Math.PI / 2);
+  add(new THREE.CylinderGeometry(1.0, 1.9, 8, 12), 0, 0, -13, Math.PI / 2);
+
+  /* wings — swept, tapered, low-mounted */
+  const wingShape = new THREE.Shape();
+  wingShape.moveTo(0, 0.5);
+  wingShape.lineTo(5.2, 0);
+  wingShape.lineTo(15.5, -1.6);
+  wingShape.lineTo(15.5, -0.2);
+  wingShape.closePath();
+  const wingGeo = new THREE.ExtrudeGeometry(wingShape, { depth: .3, bevelEnabled: false });
+  wingGeo.rotateX(-Math.PI / 2);
+  add(wingGeo, 0, -1.3, 6);
+  const wingL = add(wingGeo.clone(), 0, -1.3, 6);
+  wingL.scale.x = -1;
+
+  /* tailplane */
+  const tailShape = new THREE.Shape();
+  tailShape.moveTo(0, 0.2);
+  tailShape.lineTo(3.2, 0);
+  tailShape.lineTo(6.2, -0.6);
+  tailShape.lineTo(6.2, 0.2);
+  tailShape.closePath();
+  const tailGeo = new THREE.ExtrudeGeometry(tailShape, { depth: .2, bevelEnabled: false });
+  tailGeo.rotateX(-Math.PI / 2);
+  add(tailGeo, 0, 0.7, -15.5);
+  const tailL = add(tailGeo.clone(), 0, 0.7, -15.5);
+  tailL.scale.x = -1;
+
+  /* fin */
+  const finShape = new THREE.Shape();
+  finShape.moveTo(0, 0);
+  finShape.lineTo(5.2, 0);
+  finShape.lineTo(1.2, 7.5);
+  finShape.closePath();
+  const finGeo = new THREE.ExtrudeGeometry(finShape, { depth: .2, bevelEnabled: false });
+  finGeo.rotateY(Math.PI / 2);
+  add(finGeo, 0, 0, -16.5);
+
+  /* engines under the wings */
+  const engGeo = new THREE.CylinderGeometry(1.05, 1.05, 3.4, 12);
+  add(engGeo, 5.6, -2.2, 4.5, Math.PI / 2);
+  add(engGeo, -5.6, -2.2, 4.5, Math.PI / 2);
+
+  return g;
+}
+
+let GL = null;
+
+function glInit() {
+  const cv = H.gl;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h || typeof THREE === 'undefined') return false;
+  const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050505);
+  const camera = new THREE.PerspectiveCamera(55, w / h, 1, 500000);
+  scene.add(new THREE.AmbientLight(0xffffff, .6));
+  const sun = new THREE.DirectionalLight(0xffffff, .9);
+  sun.position.set(-30000, 40000, -20000);
+  scene.add(sun);
+
+  const plane = buildPlane();
+  plane.rotation.order = 'YXZ';
+  scene.add(plane);
+
+  scene.add(new THREE.GridHelper(24000, 24, 0x221f1a, 0x17150f));
+
+  /* planned route, always visible */
+  const routePts = [];
+  for (let i = 0; i <= 80; i++) {
+    const f = i / 80;
+    const lat = BRS.lat + (SVQ.lat - BRS.lat) * f;
+    const lng = BRS.lng + (SVQ.lng - BRS.lng) * f - 0.8 * Math.sin(Math.PI * f);
+    const xy = toXY(lat, lng);
+    routePts.push(new THREE.Vector3(xy[0], 0, -xy[1]));
+  }
+  scene.add(new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(routePts),
+    new THREE.LineBasicMaterial({ color: 0xffb454, transparent: true, opacity: .22 })
+  ));
+
+  /* cities on the corridor */
+  for (const c of DEMO_CITIES) {
+    const xy = toXY(c[1], c[2]);
+    const sp = makeLabel(c[0], 3600);
+    sp.position.set(xy[0], 90, -xy[1]);
+    scene.add(sp);
+  }
+
+  /* traffic dots + labels */
+  const dots = TRAFFIC.map(() => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(110, 8, 8), new THREE.MeshBasicMaterial({ color: 0x7a756c }));
+    m.visible = false;
+    scene.add(m);
+    return m;
+  });
+  const labs = TRAFFIC.map(() => {
+    const sp = makeLabel('', 2600);
+    sp.visible = false;
+    scene.add(sp);
+    return sp;
+  });
+
+  /* altitude hairline, updated in place */
+  const hair = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+    new THREE.LineBasicMaterial({ color: 0xe6e1d6, transparent: true, opacity: .12 })
+  );
+  scene.add(hair);
+
+  GL = { renderer, scene, camera, plane, dots, labs, hair, cam: null };
+  return true;
+}
+
 function draw3D() {
-  const cv = H.horizon, dpr = sizeCv(cv);
+  if (!GL && !glInit()) return;
+  const cv = H.gl;
   const w = cv.clientWidth, h = cv.clientHeight;
   if (!w || !h) return;
-  const ctx = cv.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, w, h);
+  const dpr = GL.renderer.getPixelRatio();
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr))
+    GL.renderer.setSize(w, h, false);
+  const cam = GL.camera;
+  if (cam.aspect !== w / h) { cam.aspect = w / h; cam.updateProjectionMatrix(); }
 
   let psi;
   if (S.mode === 'demo') psi = bearing(demoStep(Math.max(0, S.flightT - 0.5)), demoStep(S.flightT + 0.5));
   else psi = S.heading || 0;
 
   const p0 = toXY(S.lat, S.lng);
-  const P = [p0[0], p0[1], S.alt];
-  const fw = [Math.sin(psi), Math.cos(psi), 0];
-  const D = 200, CH = 55, LT = 70;
-  const E = [P[0] - fw[0] * D, P[1] - fw[1] * D, P[2] + CH];
-  const T = [P[0] + fw[0] * LT, P[1] + fw[1] * LT, P[2]];
-  const zax = norm3([E[0] - T[0], E[1] - T[1], E[2] - T[2]]);
-  const xax = norm3(cross3([0, 0, 1], zax));
-  const yax = cross3(zax, xax);
-  const focal = w * 1.15, cx = w / 2, cy = h / 2;
+  const P = new THREE.Vector3(p0[0], S.alt, -p0[1]);
+  const fw = [Math.sin(psi), -Math.cos(psi)];
 
-  const toScr = q => {
-    const dx = (q[0] - E[0]) * xax[0] + (q[1] - E[1]) * xax[1] + (q[2] - E[2]) * xax[2];
-    const dy = (q[0] - E[0]) * yax[0] + (q[1] - E[1]) * yax[1] + (q[2] - E[2]) * yax[2];
-    const dz = (q[0] - E[0]) * zax[0] + (q[1] - E[1]) * zax[1] + (q[2] - E[2]) * zax[2];
-    return dz > 0.5 ? [cx + dx * focal / dz, cy - dy * focal / dz] : null;
-  };
+  const pl = GL.plane;
+  pl.position.copy(P);
+  pl.rotation.y = Math.PI - psi;
+  pl.rotation.x = -S.pitch * Math.PI / 180;
+  pl.rotation.z = -S.roll * Math.PI / 180;
 
-  /* ground grid */
-  ctx.strokeStyle = 'rgba(230,225,214,.05)'; ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let g = -12000; g <= 12000; g += 1000) {
-    let a = toScr([P[0] + g, P[1] - 12000, 0]), b = toScr([P[0] + g, P[1] + 12000, 0]);
-    if (a && b) { ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
-    a = toScr([P[0] - 12000, P[1] + g, 0]); b = toScr([P[0] + 12000, P[1] + g, 0]);
-    if (a && b) { ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
-  }
-  ctx.stroke();
+  /* cinematic chase cam — behind and above, softly damped */
+  const D = 210, CH = 60, LT = 75;
+  const eye = new THREE.Vector3(P.x - fw[0] * D, P.y + CH, P.z - fw[1] * D);
+  if (!GL.cam) GL.cam = eye.clone();
+  GL.cam.lerp(eye, .14);
+  cam.position.copy(GL.cam);
+  cam.lookAt(P.x + fw[0] * LT, P.y, P.z + fw[1] * LT);
 
-  /* route + cities (demo) */
+  /* typical traffic */
   if (S.mode === 'demo') {
-    ctx.strokeStyle = 'rgba(255,180,84,.28)';
-    ctx.beginPath(); let started = false;
-    for (let i = 0; i <= 80; i++) {
-      const f = i / 80;
-      const lat = BRS.lat + (SVQ.lat - BRS.lat) * f;
-      const lng = BRS.lng + (SVQ.lng - BRS.lng) * f - 0.8 * Math.sin(Math.PI * f);
-      const s = toScr([...toXY(lat, lng), 0]);
-      if (!s) { started = false; continue; }
-      if (!started) { ctx.moveTo(s[0], s[1]); started = true; } else ctx.lineTo(s[0], s[1]);
-    }
-    ctx.stroke();
-    ctx.font = '9px ui-monospace,Menlo,monospace';
-    for (const [name, lat, lng] of DEMO_CITIES) {
-      const s = toScr([...toXY(lat, lng), 0]);
-      if (!s) continue;
-      ctx.strokeStyle = 'rgba(230,225,214,.35)';
-      ctx.beginPath();
-      ctx.moveTo(s[0] - 3, s[1]); ctx.lineTo(s[0] + 3, s[1]);
-      ctx.moveTo(s[0], s[1] - 3); ctx.lineTo(s[0], s[1] + 3);
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(230,225,214,.4)'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-      ctx.fillText(name.toUpperCase(), s[0] + 5, s[1] - 3);
-    }
-
-    /* typical traffic — small dots, amber when close */
     const t = S.flightT;
     let n = 0;
-    for (const fl of TRAFFIC) {
+    TRAFFIC.forEach((fl, i) => {
       const q = trafficPos(fl, t);
-      if (!q) continue;
+      const dot = GL.dots[i], lab = GL.labs[i];
+      if (!q) { dot.visible = lab.visible = false; return; }
       n++;
-      const s = toScr([q.x, q.y, q.alt]);
-      if (!s) continue;
-      if (Math.abs(s[0] - cx) > w * .75 || Math.abs(s[1] - cy) > h * .75) continue;
       const hd = Math.hypot(q.x - p0[0], q.y - p0[1]);
       const near = hd < 20000;
-      ctx.fillStyle = near ? 'rgba(255,180,84,.9)' : 'rgba(230,225,214,.4)';
-      ctx.beginPath(); ctx.arc(s[0], s[1], near ? 2 : 1.2, 0, 7); ctx.fill();
-      ctx.fillStyle = near ? 'rgba(255,180,84,.7)' : 'rgba(230,225,214,.28)';
-      ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-      const rel = Math.round(q.alt - S.alt);
-      ctx.fillText(q.cs + (near ? ' · ' + (rel >= 0 ? '+' : '−') + Math.abs(rel) + ' m' : ''), s[0] + 4, s[1] - 3);
-    }
+      dot.visible = lab.visible = true;
+      dot.position.set(q.x, q.alt, -q.y);
+      dot.material.color.setHex(near ? 0xffb454 : 0x7a756c);
+      lab.position.set(q.x, q.alt + 420, -q.y);
+      const text = q.cs + (near ? ' · ' + (q.alt >= S.alt ? '+' : '−') + Math.round(Math.abs(q.alt - S.alt)) + ' m' : '');
+      if (lab._t !== text) {
+        lab.material.map = makeLabel(text, 2600).material.map;
+        lab.material.needsUpdate = true;
+        lab._t = text;
+      }
+      lab.material.opacity = near ? .85 : .35;
+    });
     S.trafficN = n;
-  } else S.trafficN = 0;
-
-  /* altitude hairline down to the ground */
-  const ga = toScr(P), gb = toScr([P[0], P[1], 0]);
-  if (ga && gb) {
-    ctx.strokeStyle = 'rgba(230,225,214,.15)';
-    ctx.beginPath(); ctx.moveTo(ga[0], ga[1]); ctx.lineTo(gb[0], gb[1]); ctx.stroke();
+  } else {
+    GL.dots.forEach(d => d.visible = false);
+    GL.labs.forEach(l => l.visible = false);
+    S.trafficN = 0;
   }
 
-  /* the plane — wireframe, real attitude */
-  const model = [
-    [[0, 4.5, 0], [0, -3.5, 0]],
-    [[6, 0.2, 0], [1.2, 0.3, 0]],
-    [[-6, 0.2, 0], [-1.2, 0.3, 0]],
-    [[2.2, -3.2, 0], [-2.2, -3.2, 0]],
-    [[0, -2.8, 0], [0, -2.8, 1.6]]
-  ];
-  const pr = S.pitch * Math.PI / 180, rr = S.roll * Math.PI / 180;
-  const cp = Math.cos(pr), sp = Math.sin(pr), cr = Math.cos(rr), sr = Math.sin(rr);
-  const rx = q => [q[0], q[1] * cp - q[2] * sp, q[1] * sp + q[2] * cp];
-  const ry = q => [q[0] * cr + q[2] * sr, q[1], -q[0] * sr + q[2] * cr];
-  const yaw = q => [q[0] * Math.cos(psi) + q[1] * Math.sin(psi), -q[0] * Math.sin(psi) + q[1] * Math.cos(psi), q[2]];
-  ctx.strokeStyle = 'rgba(255,180,84,.9)'; ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  for (const [a, b] of model) {
-    const A = yaw(ry(rx(a))), B = yaw(ry(rx(b)));
-    const sa = toScr([P[0] + A[0], P[1] + A[1], P[2] + A[2]]);
-    const sb = toScr([P[0] + B[0], P[1] + B[1], P[2] + B[2]]);
-    if (sa && sb) { ctx.moveTo(sa[0], sa[1]); ctx.lineTo(sb[0], sb[1]); }
-  }
-  ctx.stroke();
+  /* altitude hairline */
+  const hp = GL.hair.geometry.attributes.position;
+  hp.setXYZ(0, P.x, P.y, P.z);
+  hp.setXYZ(1, P.x, 0, P.z);
+  hp.needsUpdate = true;
+
+  GL.renderer.render(GL.scene, cam);
 }
 
 function drawProfile() {
@@ -655,6 +759,8 @@ const setView = v => {
   S.view = v;
   H.vdial.classList.toggle('on', v === 'dial');
   H.v3d.classList.toggle('on', v === '3d');
+  H.horizon.style.display = v === 'dial' ? '' : 'none';
+  H.gl.style.display = v === '3d' ? '' : 'none';
 };
 H.vdial.onclick = () => setView('dial');
 H.v3d.onclick = () => setView('3d');
