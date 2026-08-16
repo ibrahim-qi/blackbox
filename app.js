@@ -693,12 +693,12 @@ function draw3D() {
   /* cinematic chase cam — behind and above, softly damped.
      The fov adapts to the window shape: the plane stays a hero in any aspect —
      half the canvas height on a phone, a full letterbox strip on a wide window. */
-  const D = S.camD || 68, CH = S.camH || 20, LT = S.camL || 0;
+  const D = S.camD || 32, CH = S.camH || 8, LT = S.camL || 0;
   const Wpx = cv.clientWidth, Hpx = cv.clientHeight;
-  let planePx = 0.5 * Hpx;
-  if (planePx < 0.3 * Wpx) planePx = Math.min(0.3 * Wpx, Hpx * 0.92);
-  const focalY = planePx * D / 37;                       // 37 m = the plane's length
-  const fovDeg = 2 * Math.atan((Hpx / 2) / focalY) * 180 / Math.PI;
+  /* industry-standard chase cam: the 31 m wingspan spans ~80% of the width,
+     the fov adapts to the window shape, clamped so it never fisheyes */
+  const focalX = 0.4 * Wpx * D / 15.5;
+  const fovDeg = clamp(2 * Math.atan((Hpx / 2) / focalX) * 180 / Math.PI, 14, 70);
   if (Math.abs(cam.fov - fovDeg) > 0.1) { cam.fov = fovDeg; cam.updateProjectionMatrix(); }
 
   const eye = new THREE.Vector3(P.x - fw[0] * D, P.y + CH, P.z - fw[1] * D);
