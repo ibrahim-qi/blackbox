@@ -804,9 +804,11 @@ function narrator() {
     if (near) return near.slice(0, -1);   // a passing plane owns the line for a moment
     return s;
   }
-  if (S.mode === 'armed') return S.fix
-    ? 'GPS locked — EZY2899 departs ' + FLIGHT.dep + ', arriving in Seville around 20:00. Waiting for takeoff.'
-    : 'Looking for GPS — keep me near a window. EZY2899 leaves at ' + FLIGHT.dep + '.';
+  if (S.mode === 'armed') {
+    if (!S.fix) return 'Looking for GPS — keep me near a window. EZY2899 leaves at ' + FLIGHT.dep + '.';
+    return 'GPS locked' + (FUSE.init ? ' · sensors reading' : ' · waiting for sensors — tilt the phone') +
+      ' — EZY2899 departs ' + FLIGHT.dep + ', arriving around 20:00.';
+  }
   return '';
 }
 
