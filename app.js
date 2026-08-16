@@ -598,7 +598,14 @@ function glInit() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050505);
   if (!S.noFog) scene.fog = new THREE.Fog(0x050505, 60000, 280000);
-  const camera = new THREE.PerspectiveCamera(55, w / h, 10, 3000000);
+  /* fixed projection, chosen once — the 31 m wingspan spans ~78% of the width
+     at this window's aspect. Never recomputed per frame: a resizing layout
+     must not change the zoom. */
+  const spanHalf = Math.atan(15.5 / 32);
+  const fovH = 2 * spanHalf / 0.78;
+  const camera = new THREE.PerspectiveCamera(
+    clamp(2 * Math.atan(Math.tan(fovH / 2) / (w / h)) * 180 / Math.PI, 30, 70),
+    w / h, 10, 3000000);
   scene.add(new THREE.AmbientLight(0xffffff, .75));
   const sun = new THREE.DirectionalLight(0xffffff, 1.0);
   sun.position.set(-30000, 40000, -20000);
@@ -694,12 +701,6 @@ function draw3D() {
      The fov adapts to the window shape: the plane stays a hero in any aspect —
      half the canvas height on a phone, a full letterbox strip on a wide window. */
   const D = S.camD || 32, CH = S.camH || 8, LT = S.camL || 0;
-  const Wpx = cv.clientWidth, Hpx = cv.clientHeight;
-  /* industry-standard chase cam: the 31 m wingspan spans ~80% of the width,
-     the fov adapts to the window shape, clamped so it never fisheyes */
-  const focalX = 0.4 * Wpx * D / 15.5;
-  const fovDeg = clamp(2 * Math.atan((Hpx / 2) / focalX) * 180 / Math.PI, 14, 70);
-  if (Math.abs(cam.fov - fovDeg) > 0.1) { cam.fov = fovDeg; cam.updateProjectionMatrix(); }
 
   const eye = new THREE.Vector3(P.x - fw[0] * D, P.y + CH, P.z - fw[1] * D);
   if (!GL.cam || GL.cam.distanceTo(eye) > 2000) GL.cam = eye.clone();   // snap on big jumps
