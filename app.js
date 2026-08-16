@@ -22,6 +22,7 @@ const S = {
   flightT: 0,              // flight time, s
   gs: 0, alt: 0, vs: 0,    // m/s, m, m/s
   pitch: 0, roll: 0,       // deg
+  attWord: '',             // what the plane is doing, in words
   mach: 0, oatC: 15, windKt: 0,
   lat: null, lng: null, fix: false, fixAcc: null,
   samples: [], altHist: [], maxAlt: 0, maxGs: 0, startedAt: null
@@ -250,6 +251,14 @@ function drawADI(pitch, roll) {
   ctx.moveTo(cx + 9, cy); ctx.lineTo(cx + 34, cy);
   ctx.stroke();
   ctx.beginPath(); ctx.arc(cx, cy, 2.2, 0, 7); ctx.fillStyle = ACCENT; ctx.fill();
+
+  /* what the plane is doing, in words, inside the dial */
+  if (S.attWord) {
+    ctx.fillStyle = 'rgba(255,180,84,.75)';
+    ctx.font = '9px ui-monospace,Menlo,monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText(S.attWord.toUpperCase().split('').join(' '), cx, cy + 30);
+  }
 }
 
 function drawProfile() {
@@ -276,7 +285,7 @@ function drawProfile() {
   ctx.fillStyle = ACCENT; ctx.beginPath(); ctx.arc(lx, ly, 2, 0, 7); ctx.fill();
   ctx.fillStyle = '#5c574e'; ctx.font = '8px ui-monospace,Menlo,monospace';
   ctx.textAlign = 'right'; ctx.textBaseline = 'top';
-  ctx.fillText('alt profile', w - 4, 4);
+  ctx.fillText('your climb & descent', w - 4, 4);
 }
 
 /* ---------------- human language layer ---------------- */
@@ -348,7 +357,14 @@ function updateHUD() {
   H.oatcap.textContent = oatCaption(S.oatC);
   H.windcap.textContent = windCaption(S.windKt * 1.852);
   H.narr.innerHTML = narrator();
-  H.pro.textContent = group(S.gs * MS2KT) + ' kt · M ' + S.mach.toFixed(2) + ' · FL' +
+  if (S.mode !== 'demo' && S.mode !== 'flying') S.attWord = '';
+  else if (Math.abs(S.roll) > 10) S.attWord = S.roll > 0 ? 'banking right' : 'banking left';
+  else if (S.vs > 3) S.attWord = 'climbing';
+  else if (S.vs < -3) S.attWord = 'descending';
+  else if (S.alt < 20) S.attWord = S.gs * MS2KT > 25 ? 'rolling' : 'on the ground';
+  else S.attWord = 'level flight';
+  H.pro.textContent = (S.mode === 'demo' ? 'simulated · ' : '') + 'pilot units · ' +
+    group(S.gs * MS2KT) + ' kt · M ' + S.mach.toFixed(2) + ' · FL' +
     Math.round(S.alt * M2FT / 100) + ' · ' + (S.vs >= 0 ? '+' : '−') + group(Math.abs(S.vs * MS2FPM)) + ' fpm';
 }
 
