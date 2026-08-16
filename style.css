@@ -49,8 +49,10 @@ header { display: flex; justify-content: space-between; align-items: baseline; g
 #overlay {
   position: fixed; inset: 0; z-index: 10; background: var(--bg);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 34px; text-align: center; padding: 24px;
+  gap: 30px; text-align: center; padding: 24px;
+  opacity: 1; pointer-events: auto; transition: opacity .35s ease;
 }
+#overlay.hidden { opacity: 0; pointer-events: none; }
 #overlay h1 { font-size: 34px; font-weight: 500; letter-spacing: .42em; text-transform: lowercase; }
 #overlay h1 span { color: var(--accent); }
 #overlay .sub { font-size: 11px; letter-spacing: .16em; color: var(--dim); max-width: 320px; line-height: 1.8; text-transform: uppercase; }
@@ -65,15 +67,25 @@ button:active { background: var(--hairline); }
 button.primary { border-color: var(--accent); color: var(--accent); }
 .seg { display: flex; border: 1px solid var(--hairline); border-radius: 999px; overflow: hidden; }
 #reset, #vreport { display: none; }
-.tap { color: var(--accent); border-bottom: 1px dotted var(--dim); }
+.tap {
+  color: var(--accent); border: 1px solid var(--hairline); border-radius: 999px;
+  padding: 2px 10px; margin: 0 2px; display: inline-block;
+}
+.check {
+  font-size: 9px; letter-spacing: .12em; color: var(--faint);
+  text-transform: uppercase; line-height: 2.2;
+  display: flex; flex-direction: column; align-items: center;
+}
 #report {
   position: fixed; inset: 0; z-index: 20; background: var(--bg);
-  display: none; flex-direction: column; gap: 12px;
+  display: flex; flex-direction: column; gap: 12px;
   padding: calc(16px + env(safe-area-inset-top))
            calc(14px + env(safe-area-inset-right))
            calc(12px + env(safe-area-inset-bottom))
            calc(14px + env(safe-area-inset-left));
+  opacity: 0; pointer-events: none; transition: opacity .35s ease;
 }
+#report.show { opacity: 1; pointer-events: auto; }
 .rhead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .rmode { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; }
 .rflight { font-size: 11px; letter-spacing: .08em; color: var(--dim); text-align: right; }

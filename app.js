@@ -10,9 +10,9 @@ const H = {
   status: $('status'), pos: $('pos'),
   gs: $('gs'), alt: $('alt'), oat: $('oat'), wind: $('wind'),
   gscap: $('gscap'), altcap: $('altcap'), oatcap: $('oatcap'), windcap: $('windcap'),
-  narr: $('narr'),
+  narr: $('narr'), note: $('note'),
   gl: $('gl'),
-  overlay: $('overlay'), osub: $('osub'), start: $('start'), demo: $('demo'),
+  overlay: $('overlay'), osub: $('osub'), check: $('check'), start: $('start'), demo: $('demo'),
   reset: $('reset'), vreport: $('vreport'), deptime: $('deptime'),
   report: $('report'), rflight: $('rflight'), rstats: $('rstats'), rstats2: $('rstats2'),
   rtrack: $('rtrack'), rprofile: $('rprofile'), rclose: $('rclose')
@@ -350,7 +350,7 @@ function renderReport() {
         Math.abs(s.lng - c[2]) * 111.32 * Math.cos(c[1] * Math.PI / 180) < 40))
       passed.push(c[0]);
   }
-  H.report.style.display = 'flex';
+  H.report.classList.add('show');
   H.rflight.textContent = FLIGHT.cs + ' · ' + FLIGHT.from + ' → ' + FLIGHT.to + ' · ' + samples.length + ' samples';
   H.rstats.innerHTML = 'in the air <b>' + fmtT(dur) + '</b> · highest <b>' + (maxAlt / 1000).toFixed(1) + ' km</b> · fastest <b>' +
     group(maxGs * 3.6) + ' km/h</b>' +
@@ -619,6 +619,7 @@ function glInit() {
 }
 
 function draw3D() {
+  if (S.mode === 'idle') return;   // nothing to show behind the start screen
   if (!GL && !glInit()) return;
   const cv = H.gl;
   const w = cv.clientWidth, h = cv.clientHeight;
@@ -788,6 +789,8 @@ function updateStatus() {
     H.status.textContent = '—';
     H.pos.textContent = 'blackbox';
   }
+  /* the flight-day checklist only matters before takeoff */
+  if (H.note) H.note.style.display = S.mode === 'armed' ? '' : 'none';
 }
 
 let lastDraw = 0, lastHud = 0;
@@ -809,12 +812,13 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 /* ---------------- ui ---------------- */
-function hideOverlay() { H.overlay.style.display = 'none'; }
+function hideOverlay() { H.overlay.classList.add('hidden'); }
 
 function showOverlay(title, sub, resetOnly) {
-  H.overlay.style.display = 'flex';
+  H.overlay.classList.remove('hidden');
   document.querySelector('#overlay h1').innerHTML = title;
   H.osub.innerHTML = sub;
+  H.check.style.display = resetOnly ? 'none' : '';
   H.start.style.display = resetOnly ? 'none' : '';
   H.demo.style.display = resetOnly ? 'none' : '';
   H.reset.style.display = resetOnly ? '' : 'none';
