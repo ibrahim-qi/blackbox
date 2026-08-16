@@ -1,0 +1,9 @@
+{
+  "name": "blackbox",
+  "short_name": "blackbox",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#050505"
+}
