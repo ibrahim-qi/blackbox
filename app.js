@@ -105,7 +105,7 @@ window.addEventListener('devicemotion', e => {
       FUSE.roll = .98 * FUSE.roll + .02 * rA;
     }
   }
-  if (S.mode === 'flying') { S.pitch = FUSE.pitch; S.roll = FUSE.roll; }
+  if (S.mode === 'flying' || S.mode === 'armed') { S.pitch = FUSE.pitch; S.roll = FUSE.roll; }
 });
 
 function armGPS() {
