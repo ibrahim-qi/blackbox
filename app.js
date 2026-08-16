@@ -366,9 +366,25 @@ function makeLabel(text, scale) {
   x.fillText(text.toUpperCase(), 256, 62);
   const tex = new THREE.CanvasTexture(c);
   tex.minFilter = THREE.LinearFilter;
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, fog: false }));
   sp.scale.set(scale || 3600, (scale || 3600) / 4, 1);
   return sp;
+}
+
+/* sun position — the shading on the plane matches the real sun */
+function sunDir() {
+  const lat = S.lat * Math.PI / 180, lng = S.lng * Math.PI / 180;
+  const now = new Date();
+  const doy = (now - Date.UTC(now.getUTCFullYear(), 0, 0)) / 86400000;
+  const decl = -23.44 * Math.cos(2 * Math.PI * (doy + 10) / 365) * Math.PI / 180;
+  const solarTime = now.getUTCHours() + now.getUTCMinutes() / 60 + lng * 12 / Math.PI;
+  const ha = (solarTime - 12) * 15 * Math.PI / 180;
+  const sinEl = Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl) * Math.cos(ha);
+  const el = Math.asin(sinEl);
+  const cosAz = (Math.sin(decl) - Math.sin(lat) * sinEl) / (Math.cos(lat) * Math.cos(el));
+  const az = Math.acos(clamp(cosAz, -1, 1));
+  const azimuth = Math.sin(ha) > 0 ? az : -az;              // east positive
+  return new THREE.Vector3(Math.cos(el) * Math.sin(azimuth), Math.sin(el), -Math.cos(el) * Math.cos(azimuth));
 }
 
 /* the plane — a low-poly a320 built from geometry, nose +Z, wings ±X, up +Y */
@@ -448,6 +464,7 @@ function glInit() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050505);
+  scene.fog = new THREE.Fog(0x050505, 60000, 280000);
   const camera = new THREE.PerspectiveCamera(55, w / h, 1, 500000);
   scene.add(new THREE.AmbientLight(0xffffff, .6));
   const sun = new THREE.DirectionalLight(0xffffff, .9);
@@ -503,7 +520,7 @@ function glInit() {
   );
   scene.add(hair);
 
-  GL = { renderer, scene, camera, plane, dots, labs, hair, cam: null };
+  GL = { renderer, scene, camera, plane, dots, labs, hair, cam: null, sun };
   return true;
 }
 
@@ -533,12 +550,15 @@ function draw3D() {
   pl.rotation.z = -S.roll * Math.PI / 180;
 
   /* cinematic chase cam — behind and above, softly damped */
-  const D = 210, CH = 60, LT = 75;
+  const D = 150, CH = 45, LT = 60;
   const eye = new THREE.Vector3(P.x - fw[0] * D, P.y + CH, P.z - fw[1] * D);
   if (!GL.cam) GL.cam = eye.clone();
   GL.cam.lerp(eye, .14);
   cam.position.copy(GL.cam);
   cam.lookAt(P.x + fw[0] * LT, P.y, P.z + fw[1] * LT);
+
+  /* shade the plane with the real sun */
+  GL.sun.position.copy(sunDir().multiplyScalar(40000));
 
   /* typical traffic */
   if (S.mode === 'demo') {
