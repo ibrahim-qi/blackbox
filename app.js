@@ -691,12 +691,13 @@ function draw3D() {
   GL.ground.position.set(P.x, 0, P.z);
 
   /* cinematic chase cam — behind and above, softly damped */
-  const D = S.camD || 100, CH = S.camH || 42, LT = S.camL || 0;
+  const D = S.camD || 75, CH = S.camH || 34, LT = S.camL || 0;
   const eye = new THREE.Vector3(P.x - fw[0] * D, P.y + CH, P.z - fw[1] * D);
   if (!GL.cam || GL.cam.distanceTo(eye) > 2000) GL.cam = eye.clone();   // snap on big jumps
   else GL.cam.lerp(eye, .14);
   cam.position.copy(GL.cam);
   cam.lookAt(P.x + fw[0] * LT, P.y, P.z + fw[1] * LT);
+  cam.rotateZ((S.roll || 0) * 0.4 * Math.PI / 180);   // lean into the turns
 
   /* shade the plane with the real sun */
   GL.sun.position.copy(sunDir().multiplyScalar(40000));
