@@ -271,9 +271,6 @@ function nearTrafficString() {
     (Math.abs(rel) > 300 ? (rel > 0 ? ', ' + group(Math.abs(rel)) + ' m above' : ', ' + group(Math.abs(rel)) + ' m below') : '') + '. ';
 }
 
-const norm3 = v => { const m = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / m, v[1] / m, v[2] / m]; };
-const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-
 function bearing(a, b) {
   const f1 = a.lat * Math.PI / 180, f2 = b.lat * Math.PI / 180;
   const dl = (b.lng - a.lng) * Math.PI / 180;
@@ -317,8 +314,8 @@ function sunDir() {
 /* the plane — a low-poly a320 built from geometry, nose +Z, wings ±X, up +Y */
 function buildPlane() {
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x26272b, flatShading: true, side: THREE.DoubleSide });
-  const edgeMat = new THREE.LineBasicMaterial({ color: 0xffb454, transparent: true, opacity: .5 });
+  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x3c3d42, flatShading: true, side: THREE.DoubleSide });
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0xffb454, transparent: true, opacity: .6 });
 
   const add = (geo, x, y, z, rx, ry, rz) => {
     const grp = new THREE.Group();
@@ -387,14 +384,17 @@ function glInit() {
   const cv = H.gl;
   const w = cv.clientWidth, h = cv.clientHeight;
   if (!w || !h || typeof THREE === 'undefined') return false;
-  const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: true });
+  } catch (e) { return false; }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050505);
-  scene.fog = new THREE.Fog(0x050505, 60000, 280000);
-  const camera = new THREE.PerspectiveCamera(55, w / h, 1, 500000);
-  scene.add(new THREE.AmbientLight(0xffffff, .6));
-  const sun = new THREE.DirectionalLight(0xffffff, .9);
+  if (!S.noFog) scene.fog = new THREE.Fog(0x050505, 60000, 280000);
+  const camera = new THREE.PerspectiveCamera(55, w / h, 10, 3000000);
+  scene.add(new THREE.AmbientLight(0xffffff, .75));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.0);
   sun.position.set(-30000, 40000, -20000);
   scene.add(sun);
 
@@ -402,28 +402,42 @@ function glInit() {
   plane.rotation.order = 'YXZ';
   scene.add(plane);
 
-  scene.add(new THREE.GridHelper(24000, 24, 0x221f1a, 0x17150f));
+  /* the earth — a dark disc with a horizon, grid etched on top */
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(S.discR || 400000, 48),
+    new THREE.MeshBasicMaterial({ color: S.groundRed ? 0xff0000 : 0x262019 })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.frustumCulled = false;
+  scene.add(ground);
+  const grid = new THREE.GridHelper(24000, 24, 0x3a332a, 0x2e2920);
+  grid.position.y = 1;                       // above the disc — no z-fighting
+  scene.add(grid);
 
-  /* planned route, always visible */
-  const routePts = [];
-  for (let i = 0; i <= 80; i++) {
-    const f = i / 80;
-    const lat = BRS.lat + (SVQ.lat - BRS.lat) * f;
-    const lng = BRS.lng + (SVQ.lng - BRS.lng) * f - 0.8 * Math.sin(Math.PI * f);
-    const xy = toXY(lat, lng);
-    routePts.push(new THREE.Vector3(xy[0], 0, -xy[1]));
-  }
-  scene.add(new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints(routePts),
-    new THREE.LineBasicMaterial({ color: 0xffb454, transparent: true, opacity: .22 })
-  ));
+  if (!S.clean) {
+    /* planned route, always visible */
+    const routePts = [];
+    for (let i = 0; i <= 80; i++) {
+      const f = i / 80;
+      const lat = BRS.lat + (SVQ.lat - BRS.lat) * f;
+      const lng = BRS.lng + (SVQ.lng - BRS.lng) * f - 0.8 * Math.sin(Math.PI * f);
+      const xy = toXY(lat, lng);
+      routePts.push(new THREE.Vector3(xy[0], 0, -xy[1]));
+    }
+    const routeLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(routePts),
+      new THREE.LineBasicMaterial({ color: 0xffb454, transparent: true, opacity: .45 })
+    );
+    routeLine.position.y = 4;
+    scene.add(routeLine);
 
-  /* cities on the corridor */
-  for (const c of DEMO_CITIES) {
-    const xy = toXY(c[1], c[2]);
-    const sp = makeLabel(c[0], 3600);
-    sp.position.set(xy[0], 90, -xy[1]);
-    scene.add(sp);
+    /* cities on the corridor */
+    for (const c of DEMO_CITIES) {
+      const xy = toXY(c[1], c[2]);
+      const sp = makeLabel(c[0], 3600);
+      sp.position.set(xy[0], 90, -xy[1]);
+      scene.add(sp);
+    }
   }
 
   /* traffic dots + labels */
@@ -443,11 +457,11 @@ function glInit() {
   /* altitude hairline, updated in place */
   const hair = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
-    new THREE.LineBasicMaterial({ color: 0xe6e1d6, transparent: true, opacity: .12 })
+    new THREE.LineBasicMaterial({ color: 0xe6e1d6, transparent: true, opacity: .22 })
   );
   scene.add(hair);
 
-  GL = { renderer, scene, camera, plane, dots, labs, hair, cam: null, sun };
+  GL = { renderer, scene, camera, plane, ground, grid, dots, labs, hair, cam: null, sun };
   return true;
 }
 
@@ -476,8 +490,12 @@ function draw3D() {
   pl.rotation.x = -S.pitch * Math.PI / 180;
   pl.rotation.z = -S.roll * Math.PI / 180;
 
+  /* earth + grid follow the plane */
+  GL.ground.position.set(P.x, 0, P.z);
+  GL.grid.position.set(P.x, 1, P.z);
+
   /* cinematic chase cam — behind and above, softly damped */
-  const D = 150, CH = 45, LT = 60;
+  const D = S.camD || 130, CH = S.camH || 55, LT = S.camL || 0;
   const eye = new THREE.Vector3(P.x - fw[0] * D, P.y + CH, P.z - fw[1] * D);
   if (!GL.cam) GL.cam = eye.clone();
   GL.cam.lerp(eye, .14);
@@ -488,7 +506,7 @@ function draw3D() {
   GL.sun.position.copy(sunDir().multiplyScalar(40000));
 
   /* typical traffic */
-  if (S.mode === 'demo') {
+  if (S.mode === 'demo' && !S.clean) {
     const t = S.flightT;
     let n = 0;
     TRAFFIC.forEach((fl, i) => {
@@ -520,7 +538,7 @@ function draw3D() {
   /* altitude hairline */
   const hp = GL.hair.geometry.attributes.position;
   hp.setXYZ(0, P.x, P.y, P.z);
-  hp.setXYZ(1, P.x, 0, P.z);
+  hp.setXYZ(1, P.x, 4, P.z);
   hp.needsUpdate = true;
 
   GL.renderer.render(GL.scene, cam);
@@ -588,6 +606,7 @@ function narrator() {
 
 function updateHUD() {
   const kmh = S.gs * 3.6, km = S.alt / 1000;
+  S.oatC = isa(S.alt).T - 273.15;      // pure function of altitude — can never go stale
   H.gs.textContent = group(kmh);
   H.alt.textContent = km.toFixed(1);
   H.oat.textContent = (S.oatC >= 0 ? '+' : '−') + Math.abs(Math.round(S.oatC));
@@ -676,7 +695,34 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
   const q = new URLSearchParams(location.search);
   if (!q.get('demo')) return;
   S.mode = 'demo';
-  S.t0 = performance.now() - parseFloat(q.get('t') || '0') * 1000;
+  const t = parseFloat(q.get('t') || '0');
+  S.camD = parseFloat(q.get('cam') || '0') || null;
+  S.camH = parseFloat(q.get('ch') || '0') || null;
+  S.camL = parseFloat(q.get('lt') || '0') || null;
+  S.clean = !!q.get('clean');
+  S.noFog = !!q.get('nofog');
+  S.groundRed = !!q.get('groundred');
+  S.discR = parseFloat(q.get('discr') || '0') || null;
+  const hq = parseFloat(q.get('h') || '0');
+  if (hq) { H.gl.style.height = hq + 'px'; H.gl.style.flex = 'none'; }
+  if (q.get('test')) document.body.style.background = 'rgb(200,0,0)';
+  S.t0 = performance.now() - t * 1000;
   S.samples = []; S.altHist = []; S.maxAlt = 0; S.maxGs = 0;
   hideOverlay();
+  /* paint state synchronously so headless dumps are deterministic */
+  Object.assign(S, demoStep(t));
+  S.flightT = t;
+  updateHUD(); updateStatus();
+  if (q.get('shot')) {
+    try {
+      glInit(); draw3D();
+      const url = H.gl.toDataURL('image/png');
+      const img = document.createElement('img');
+      img.id = 'shotout';
+      img.src = url;
+      img.style.display = 'none';
+      document.body.appendChild(img);
+      console.log('SHOT ready len', url.length);
+    } catch (e) { console.log('SHOT err', e.message); }
+  }
 })();
