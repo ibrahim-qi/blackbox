@@ -11,6 +11,7 @@ const H = {
   gs: $('gs'), alt: $('alt'), oat: $('oat'), wind: $('wind'),
   gscap: $('gscap'), altcap: $('altcap'), oatcap: $('oatcap'), windcap: $('windcap'),
   narr: $('narr'), pro: $('pro'),
+  view: $('view'),
   dbg: $('dbg'), horizon: $('horizon'), profile: $('profile'),
   overlay: $('overlay'), osub: $('osub'), start: $('start'), demo: $('demo'), reset: $('reset')
 };
@@ -23,6 +24,8 @@ const S = {
   gs: 0, alt: 0, vs: 0,    // m/s, m, m/s
   pitch: 0, roll: 0,       // deg
   attWord: '',             // what the plane is doing, in words
+  heading: 0,              // rad, true north clockwise
+  view: 'dial',            // dial | 3d
   mach: 0, oatC: 15, windKt: 0,
   lat: null, lng: null, fix: false, fixAcc: null,
   samples: [], altHist: [], maxAlt: 0, maxGs: 0, startedAt: null
@@ -115,6 +118,7 @@ function armGPS() {
     S.lat = p.coords.latitude; S.lng = p.coords.longitude;
     if (p.coords.altitude != null) S.alt = p.coords.altitude;
     if (p.coords.speed != null) S.gs = p.coords.speed;
+    if (p.coords.heading != null) S.heading = p.coords.heading * Math.PI / 180;
   }, () => { S.fix = false; S.fixAcc = null; },
   { enableHighAccuracy: true, maximumAge: 1000, timeout: 30000 });
 }
@@ -259,6 +263,127 @@ function drawADI(pitch, roll) {
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
     ctx.fillText(S.attWord.toUpperCase().split('').join(' '), cx, cy + 30);
   }
+}
+
+/* ---------------- 3d chase view (fully offline) ---------------- */
+const DEMO_CITIES = [
+  ['nantes', 47.2184, -1.5536],
+  ['bordeaux', 44.8378, -0.5792],
+  ['san sebastian', 43.3183, -1.9812],
+  ['seville', 37.3891, -5.9845]
+];
+
+const norm3 = v => { const m = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / m, v[1] / m, v[2] / m]; };
+const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+function bearing(a, b) {
+  const f1 = a.lat * Math.PI / 180, f2 = b.lat * Math.PI / 180;
+  const dl = (b.lng - a.lng) * Math.PI / 180;
+  const y = Math.sin(dl) * Math.cos(f2);
+  const x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
+  return Math.atan2(y, x);
+}
+
+function draw3D() {
+  const cv = H.horizon, dpr = sizeCv(cv);
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, w, h);
+
+  const lat0 = S.mode === 'demo' ? LON.lat : S.lat, lng0 = S.mode === 'demo' ? LON.lng : S.lng;
+  const toXY = (lat, lng) => [(lng - lng0) * Math.cos(lat0 * Math.PI / 180) * 111320, (lat - lat0) * 110540];
+
+  let psi;
+  if (S.mode === 'demo') psi = bearing(demoStep(Math.max(0, S.flightT - 0.5)), demoStep(S.flightT + 0.5));
+  else psi = S.heading || 0;
+
+  const p0 = toXY(S.lat, S.lng);
+  const P = [p0[0], p0[1], S.alt];
+  const fw = [Math.sin(psi), Math.cos(psi), 0];
+  const D = 200, CH = 55, LT = 70;
+  const E = [P[0] - fw[0] * D, P[1] - fw[1] * D, P[2] + CH];
+  const T = [P[0] + fw[0] * LT, P[1] + fw[1] * LT, P[2]];
+  const zax = norm3([E[0] - T[0], E[1] - T[1], E[2] - T[2]]);
+  const xax = norm3(cross3([0, 0, 1], zax));
+  const yax = cross3(zax, xax);
+  const focal = w * 1.15, cx = w / 2, cy = h / 2;
+
+  const toScr = q => {
+    const dx = (q[0] - E[0]) * xax[0] + (q[1] - E[1]) * xax[1] + (q[2] - E[2]) * xax[2];
+    const dy = (q[0] - E[0]) * yax[0] + (q[1] - E[1]) * yax[1] + (q[2] - E[2]) * yax[2];
+    const dz = (q[0] - E[0]) * zax[0] + (q[1] - E[1]) * zax[1] + (q[2] - E[2]) * zax[2];
+    return dz > 0.5 ? [cx + dx * focal / dz, cy - dy * focal / dz] : null;
+  };
+
+  /* ground grid */
+  ctx.strokeStyle = 'rgba(230,225,214,.05)'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let g = -12000; g <= 12000; g += 1000) {
+    let a = toScr([P[0] + g, P[1] - 12000, 0]), b = toScr([P[0] + g, P[1] + 12000, 0]);
+    if (a && b) { ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+    a = toScr([P[0] - 12000, P[1] + g, 0]); b = toScr([P[0] + 12000, P[1] + g, 0]);
+    if (a && b) { ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+  }
+  ctx.stroke();
+
+  /* route + cities (demo) */
+  if (S.mode === 'demo') {
+    ctx.strokeStyle = 'rgba(255,180,84,.28)';
+    ctx.beginPath(); let started = false;
+    for (let i = 0; i <= 80; i++) {
+      const f = i / 80;
+      const lat = LON.lat + (SVQ.lat - LON.lat) * f;
+      const lng = LON.lng + (SVQ.lng - LON.lng) * f - 0.8 * Math.sin(Math.PI * f);
+      const s = toScr([...toXY(lat, lng), 0]);
+      if (!s) { started = false; continue; }
+      if (!started) { ctx.moveTo(s[0], s[1]); started = true; } else ctx.lineTo(s[0], s[1]);
+    }
+    ctx.stroke();
+    ctx.font = '9px ui-monospace,Menlo,monospace';
+    for (const [name, lat, lng] of DEMO_CITIES) {
+      const s = toScr([...toXY(lat, lng), 0]);
+      if (!s) continue;
+      ctx.strokeStyle = 'rgba(230,225,214,.35)';
+      ctx.beginPath();
+      ctx.moveTo(s[0] - 3, s[1]); ctx.lineTo(s[0] + 3, s[1]);
+      ctx.moveTo(s[0], s[1] - 3); ctx.lineTo(s[0], s[1] + 3);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(230,225,214,.4)'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+      ctx.fillText(name.toUpperCase(), s[0] + 5, s[1] - 3);
+    }
+  }
+
+  /* altitude hairline down to the ground */
+  const ga = toScr(P), gb = toScr([P[0], P[1], 0]);
+  if (ga && gb) {
+    ctx.strokeStyle = 'rgba(230,225,214,.15)';
+    ctx.beginPath(); ctx.moveTo(ga[0], ga[1]); ctx.lineTo(gb[0], gb[1]); ctx.stroke();
+  }
+
+  /* the plane — wireframe, real attitude */
+  const model = [
+    [[0, 4.5, 0], [0, -3.5, 0]],
+    [[6, 0.2, 0], [1.2, 0.3, 0]],
+    [[-6, 0.2, 0], [-1.2, 0.3, 0]],
+    [[2.2, -3.2, 0], [-2.2, -3.2, 0]],
+    [[0, -2.8, 0], [0, -2.8, 1.6]]
+  ];
+  const pr = S.pitch * Math.PI / 180, rr = S.roll * Math.PI / 180;
+  const cp = Math.cos(pr), sp = Math.sin(pr), cr = Math.cos(rr), sr = Math.sin(rr);
+  const rx = q => [q[0], q[1] * cp - q[2] * sp, q[1] * sp + q[2] * cp];
+  const ry = q => [q[0] * cr + q[2] * sr, q[1], -q[0] * sr + q[2] * cr];
+  const yaw = q => [q[0] * Math.cos(psi) + q[1] * Math.sin(psi), -q[0] * Math.sin(psi) + q[1] * Math.cos(psi), q[2]];
+  ctx.strokeStyle = 'rgba(255,180,84,.9)'; ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  for (const [a, b] of model) {
+    const A = yaw(ry(rx(a))), B = yaw(ry(rx(b)));
+    const sa = toScr([P[0] + A[0], P[1] + A[1], P[2] + A[2]]);
+    const sb = toScr([P[0] + B[0], P[1] + B[1], P[2] + B[2]]);
+    if (sa && sb) { ctx.moveTo(sa[0], sa[1]); ctx.lineTo(sb[0], sb[1]); }
+  }
+  ctx.stroke();
 }
 
 function drawProfile() {
@@ -406,7 +531,7 @@ function frame(now) {
   }
   if (now - lastDraw > 40) {
     lastDraw = now;
-    drawADI(S.pitch, S.roll);
+    if (S.view === '3d') draw3D(); else drawADI(S.pitch, S.roll);
     drawProfile();
   }
   if (now - lastHud > 100) {
@@ -447,6 +572,11 @@ H.start.onclick = async () => {
 };
 
 H.reset.onclick = () => location.reload();
+
+H.view.onclick = () => {
+  S.view = S.view === 'dial' ? '3d' : 'dial';
+  H.view.textContent = S.view;
+};
 
 /* ---------------- offline ---------------- */
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))

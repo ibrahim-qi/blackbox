@@ -66,4 +66,5 @@ button {
 }
 button:active { background: var(--hairline); }
 button.primary { border-color: var(--accent); color: var(--accent); }
+button.view { padding: 4px 12px; font-size: 10px; letter-spacing: .14em; color: var(--dim); }
 #reset { display: none; }
