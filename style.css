@@ -42,7 +42,7 @@ header { display: flex; justify-content: space-between; align-items: baseline; g
 .cell .cap { font-size: 10px; letter-spacing: .04em; color: var(--dim); margin-top: 5px; line-height: 1.4; }
 .narr {
   font-size: 13px; letter-spacing: .03em; line-height: 1.7; text-align: center;
-  color: var(--fg); min-height: 44px; padding: 0 6px;
+  color: var(--fg); height: 44px; overflow: hidden; padding: 0 6px;
 }
 .narr b { color: var(--accent); font-weight: 500; }
 .note { font-size: 9px; letter-spacing: .14em; color: var(--faint); text-align: center; text-transform: uppercase; }

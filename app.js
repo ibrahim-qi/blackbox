@@ -664,7 +664,7 @@ function glInit() {
   scene.add(hair);
 
   GL = { renderer, scene, camera, plane, ground, dots, labs, hair, cam: null, sun };
-  (window.BLACKBOX_TILES || []).slice(0, S.tileMax < 0 ? 1e9 : S.tileMax).forEach(t => addTile(t));
+  (window.BLACKBOX_TILES || []).slice(S.tileOff || 0, S.tileMax < 0 ? 1e9 : (S.tileOff || 0) + S.tileMax).forEach(t => addTile(t));
   return true;
 }
 
@@ -795,12 +795,11 @@ function narrator() {
         (S.mode === 'demo' ? fmtEta(DEMO_T - S.flightT) : fmtEta(liveEta())) + '.';
     } else if (km > 8) {
       s = 'Cruising at <b>' + km.toFixed(1) + ' km</b>, ' + Math.round(kmh) + ' km/h — ' +
-        Math.round(S.mach * 100) + '% the speed of sound.';
-      if (S.windKt > 15) s += ' Tailwind pushing us along.';
-      else if (S.windKt < -15) s += ' Headwind slowing us down.';
-      s += ' Seville in ' + (S.mode === 'demo' ? fmtEta(DEMO_T - S.flightT) : fmtEta(liveEta())) + '.';
+        Math.round(S.mach * 100) + '% the speed of sound. Seville in ' +
+        (S.mode === 'demo' ? fmtEta(DEMO_T - S.flightT) : fmtEta(liveEta())) + '.';
     } else s = 'Settling into the climb.';
-    return near + s;
+    if (near) return near.slice(0, -1);   // a passing plane owns the line for a moment
+    return s;
   }
   if (S.mode === 'armed') return S.fix
     ? 'GPS locked — EZY2899 departs ' + FLIGHT.dep + ', arriving in Seville around 20:00. Waiting for takeoff.'
@@ -921,6 +920,7 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
   S.groundRed = !!q.get('groundred');
   S.discR = parseFloat(q.get('discr') || '0') || null;
   S.tileMax = q.get('tilemax') == null ? -1 : parseInt(q.get('tilemax'));
+  S.tileOff = parseInt(q.get('tileoff') || '0') || 0;
   S.shotVis = !!q.get('shotvis');
   const hq = parseFloat(q.get('h') || '0');
   if (hq) { H.gl.style.height = hq + 'px'; H.gl.style.flex = 'none'; }
