@@ -48,10 +48,24 @@ function isa(altM) {
 
 /* ---------------- demo flight (1 demo s = 1 real flight min) ---------------- */
 const DEMO_T = 301;
-const LON = { lat: 51.47, lng: -0.45 }, SVQ = { lat: 37.42, lng: -5.90 };
+const BRS = { lat: 51.3827, lng: -2.7191 }, SVQ = { lat: 37.418, lng: -5.8988 };
+/* the real flight — update dep/durMin from the boarding pass if they differ */
+const FLIGHT = { cs: 'EZY2899', from: 'BRS', to: 'SVQ', aircraft: 'A320', dep: '16:40', durMin: 140 };
+
+function liveEta() {
+  const dep = new Date('2026-08-18T16:40:00+01:00').getTime();   // 16:40 BST
+  return Math.max(0, (dep + FLIGHT.durMin * 60000 - Date.now()) / 1000);
+}
+
+/* dead reckoning — position along the planned route when GPS drops out */
+function deadReckon() {
+  const f = clamp(S.flightT / (FLIGHT.durMin * 60), 0, 1);
+  S.lat = BRS.lat + (SVQ.lat - BRS.lat) * f;
+  S.lng = BRS.lng + (SVQ.lng - BRS.lng) * f - 0.8 * Math.sin(Math.PI * f);
+}
 
 function demoStep(t) {
-  const o = { gs: 0, alt: 0, vs: 0, pitch: 0, roll: 0, mach: .78, windKt: 0, lat: LON.lat, lng: LON.lng, eta: DEMO_T - t };
+  const o = { gs: 0, alt: 0, vs: 0, pitch: 0, roll: 0, mach: .78, windKt: 0, lat: BRS.lat, lng: BRS.lng, eta: DEMO_T - t };
   if (t < 40) {                                   // takeoff roll
     o.gs = 1.8 * t;
   } else if (t < 54) {                            // rotation + liftoff
@@ -73,8 +87,8 @@ function demoStep(t) {
     o.alt = 0; o.gs = 72 * (1 - f); o.pitch = 3 * (1 - f); o.vs = 0; o.mach = .72; o.windKt = 30 * (1 - f);
   }
   const f = clamp(t / DEMO_T, 0, 1);
-  o.lat = LON.lat + (SVQ.lat - LON.lat) * f;
-  o.lng = LON.lng + (SVQ.lng - LON.lng) * f - 0.8 * Math.sin(Math.PI * f);
+  o.lat = BRS.lat + (SVQ.lat - BRS.lat) * f;
+  o.lng = BRS.lng + (SVQ.lng - BRS.lng) * f - 0.8 * Math.sin(Math.PI * f);
   return o;
 }
 
@@ -171,7 +185,10 @@ setInterval(() => {
     S.oatC = isa(S.alt).T - 273.15;
     recordSample();
   } else if (S.mode === 'armed' || S.mode === 'flying') {
-    if (!S.fix) return;
+    if (!S.fix) {
+      if (S.mode === 'flying') { deadReckon(); S.flightT += 1; recordSample(); }
+      return;
+    }
     const now = performance.now();
     if (lastTickT != null && lastTickAlt != null) {
       const dt = (now - lastTickT) / 1000;
@@ -268,15 +285,15 @@ function drawADI(pitch, roll) {
 
 /* ---------------- 3d chase view (fully offline) ---------------- */
 const DEMO_CITIES = [
-  ['nantes', 47.2184, -1.5536],
-  ['bordeaux', 44.8378, -0.5792],
-  ['san sebastian', 43.3183, -1.9812],
+  ['plymouth', 50.3714, -4.1422],
+  ['santander', 43.4623, -3.81],
+  ['salamanca', 40.9701, -5.6635],
   ['seville', 37.3891, -5.9845]
 ];
 
 /* local tangent plane: metres east/north of the anchor point */
 const toXY = (lat, lng) => {
-  const lat0 = S.mode === 'demo' ? LON.lat : S.lat, lng0 = S.mode === 'demo' ? LON.lng : S.lng;
+  const lat0 = S.mode === 'demo' ? BRS.lat : S.lat, lng0 = S.mode === 'demo' ? BRS.lng : S.lng;
   return [(lng - lng0) * Math.cos(lat0 * Math.PI / 180) * 111320, (lat - lat0) * 110540];
 };
 
@@ -385,8 +402,8 @@ function draw3D() {
     ctx.beginPath(); let started = false;
     for (let i = 0; i <= 80; i++) {
       const f = i / 80;
-      const lat = LON.lat + (SVQ.lat - LON.lat) * f;
-      const lng = LON.lng + (SVQ.lng - LON.lng) * f - 0.8 * Math.sin(Math.PI * f);
+      const lat = BRS.lat + (SVQ.lat - BRS.lat) * f;
+      const lng = BRS.lng + (SVQ.lng - BRS.lng) * f - 0.8 * Math.sin(Math.PI * f);
       const s = toScr([...toXY(lat, lng), 0]);
       if (!s) { started = false; continue; }
       if (!started) { ctx.moveTo(s[0], s[1]); started = true; } else ctx.lineTo(s[0], s[1]);
@@ -529,17 +546,19 @@ function narrator() {
       s = 'Climbing through <b>' + km.toFixed(1) + ' km</b> — outside it’s <b>−' + Math.abs(Math.round(S.oatC)) + '°C</b>.';
     } else if (S.vs < -3) {
       s = 'Descending through ' + km.toFixed(1) + ' km — on the ground in about ' +
-        (S.mode === 'demo' ? fmtEta(DEMO_T - S.flightT) : '15 minutes') + '.';
+        (S.mode === 'demo' ? fmtEta(DEMO_T - S.flightT) : fmtEta(liveEta())) + '.';
     } else if (km > 8) {
       s = 'Cruising at <b>' + km.toFixed(1) + ' km</b>, ' + Math.round(kmh) + ' km/h — ' +
         Math.round(S.mach * 100) + '% the speed of sound.';
       if (S.windKt > 15) s += ' Tailwind pushing us along.';
       else if (S.windKt < -15) s += ' Headwind slowing us down.';
-      if (S.mode === 'demo') s += ' Seville in ' + fmtEta(DEMO_T - S.flightT) + '.';
+      s += ' Seville in ' + (S.mode === 'demo' ? fmtEta(DEMO_T - S.flightT) : fmtEta(liveEta())) + '.';
     } else s = 'Settling into the climb.';
     return near + s;
   }
-  if (S.mode === 'armed') return S.fix ? 'GPS locked — waiting for takeoff.' : 'Looking for GPS — keep me near a window.';
+  if (S.mode === 'armed') return S.fix
+    ? 'GPS locked — EZY2899 departs ' + FLIGHT.dep + ', arriving in Seville around 20:00. Waiting for takeoff.'
+    : 'Looking for GPS — keep me near a window. EZY2899 leaves at ' + FLIGHT.dep + '.';
   return '';
 }
 
@@ -569,9 +588,9 @@ function updateHUD() {
 function updateStatus() {
   if (S.mode === 'demo') {
     H.status.innerHTML = 'demo <span class="live">· t+' + fmtT(S.flightT) + '</span>';
-    H.pos.textContent = 'lon → svq';
+    H.pos.textContent = 'brs → svq';
   } else if (S.mode === 'armed') {
-    H.status.innerHTML = S.fix ? 'armed <span class="live">· gps fix</span>' : 'armed · awaiting gps';
+    H.status.innerHTML = S.fix ? 'armed · ezy2899 <span class="live">· gps fix</span>' : 'armed · ezy2899 · awaiting gps';
     H.pos.textContent = S.fix ? fmtLat(S.lat) + ' ' + fmtLng(S.lng) : 'no fix — near a window';
   } else if (S.mode === 'flying') {
     H.status.innerHTML = 'live <span class="live">· t+' + fmtT(S.flightT) + '</span>';
