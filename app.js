@@ -11,8 +11,7 @@ const H = {
   gs: $('gs'), alt: $('alt'), oat: $('oat'), wind: $('wind'),
   gscap: $('gscap'), altcap: $('altcap'), oatcap: $('oatcap'), windcap: $('windcap'),
   narr: $('narr'),
-  vdial: $('vdial'), v3d: $('v3d'),
-  horizon: $('horizon'), gl: $('gl'), profile: $('profile'),
+  gl: $('gl'),
   overlay: $('overlay'), osub: $('osub'), start: $('start'), demo: $('demo'), reset: $('reset')
 };
 
@@ -23,10 +22,7 @@ const S = {
   flightT: 0,              // flight time, s
   gs: 0, alt: 0, vs: 0,    // m/s, m, m/s
   pitch: 0, roll: 0,       // deg
-  attWord: '',             // what the plane is doing, in words
   heading: 0,              // rad, true north clockwise
-  view: 'dial',            // dial | 3d
-  trafficN: 0,             // flights visible in the demo sky
   mach: 0, oatC: 15, windKt: 0,
   lat: null, lng: null, fix: false, fixAcc: null,
   samples: [], altHist: [], maxAlt: 0, maxGs: 0, startedAt: null
@@ -213,75 +209,6 @@ setInterval(() => {
 }, 1000);
 
 /* ---------------- render ---------------- */
-const ACCENT = '#ffb454';
-
-function sizeCv(cv) {
-  const dpr = window.devicePixelRatio || 1;
-  const w = cv.clientWidth, h = cv.clientHeight;
-  if (w && (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr))) {
-    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
-  }
-  return dpr;
-}
-
-function drawADI(pitch, roll) {
-  const cv = H.horizon, dpr = sizeCv(cv);
-  const w = cv.clientWidth, h = cv.clientHeight;
-  if (!w || !h) return;
-  const ctx = cv.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = '#070706'; ctx.fillRect(0, 0, w, h);
-  const cx = w / 2, cy = h / 2, ppd = h / 50;
-
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(-roll * Math.PI / 180);
-  const hy = pitch * ppd;
-  ctx.fillStyle = '#0c0b09'; ctx.fillRect(-cx, hy, w, h);
-  ctx.strokeStyle = 'rgba(230,225,214,.28)'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(-cx, hy); ctx.lineTo(cx, hy); ctx.stroke();
-  ctx.font = '9px ui-monospace,Menlo,monospace';
-  for (let d = -30; d <= 30; d += 5) {
-    const y = hy - d * ppd;
-    if (y < -h / 2 || y > h / 2) continue;
-    const len = d % 10 === 0 ? 26 : 13;
-    ctx.strokeStyle = d % 10 === 0 ? 'rgba(230,225,214,.45)' : 'rgba(230,225,214,.18)';
-    ctx.beginPath(); ctx.moveTo(-len, y); ctx.lineTo(len, y); ctx.stroke();
-    if (d % 10 === 0) {
-      ctx.fillStyle = '#5c574e'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText(String(Math.abs(d)), len + 5, y);
-      ctx.textAlign = 'right';
-      ctx.fillText(String(Math.abs(d)), -len - 5, y);
-    }
-  }
-  ctx.restore();
-
-  /* roll index */
-  ctx.strokeStyle = 'rgba(230,225,214,.2)';
-  ctx.beginPath(); ctx.arc(cx, cy, h / 2 - 22, -Math.PI, 0); ctx.stroke();
-  const rx = cx + Math.sin(-roll * Math.PI / 180) * (h / 2 - 22);
-  const ry = cy - Math.cos(-roll * Math.PI / 180) * (h / 2 - 22);
-  ctx.fillStyle = ACCENT;
-  ctx.beginPath();
-  ctx.moveTo(rx, ry - 4); ctx.lineTo(rx - 5, ry - 11); ctx.lineTo(rx + 5, ry - 11);
-  ctx.closePath(); ctx.fill();
-
-  /* aircraft symbol */
-  ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(cx - 34, cy); ctx.lineTo(cx - 9, cy);
-  ctx.moveTo(cx + 9, cy); ctx.lineTo(cx + 34, cy);
-  ctx.stroke();
-  ctx.beginPath(); ctx.arc(cx, cy, 2.2, 0, 7); ctx.fillStyle = ACCENT; ctx.fill();
-
-  /* what the plane is doing, in words, inside the dial */
-  if (S.attWord) {
-    ctx.fillStyle = 'rgba(255,180,84,.75)';
-    ctx.font = '9px ui-monospace,Menlo,monospace';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    ctx.fillText(S.attWord.toUpperCase().split('').join(' '), cx, cy + 30);
-  }
-}
 
 /* ---------------- 3d chase view (fully offline) ---------------- */
 const DEMO_CITIES = [
@@ -599,33 +526,6 @@ function draw3D() {
   GL.renderer.render(GL.scene, cam);
 }
 
-function drawProfile() {
-  const cv = H.profile, dpr = sizeCv(cv);
-  const w = cv.clientWidth, h = cv.clientHeight;
-  if (!w || !h) return;
-  const ctx = cv.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-  const xs = S.altHist;
-  if (xs.length < 2) return;
-  const min = Math.min.apply(null, xs), max = Math.max.apply(null, xs);
-  const span = (max - min) || 1;
-  ctx.strokeStyle = 'rgba(255,180,84,.85)'; ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let i = 0; i < xs.length; i++) {
-    const x = (i / (xs.length - 1)) * (w - 8) + 4;
-    const y = h - 10 - ((xs[i] - min) / span) * (h - 22);
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  }
-  ctx.stroke();
-  const last = xs[xs.length - 1];
-  const lx = w - 4, ly = h - 10 - ((last - min) / span) * (h - 22);
-  ctx.fillStyle = ACCENT; ctx.beginPath(); ctx.arc(lx, ly, 2, 0, 7); ctx.fill();
-  ctx.fillStyle = '#5c574e'; ctx.font = '8px ui-monospace,Menlo,monospace';
-  ctx.textAlign = 'right'; ctx.textBaseline = 'top';
-  ctx.fillText('your climb & descent', w - 4, 4);
-}
-
 /* ---------------- human language layer ---------------- */
 function speedCaption(kmh) {
   if (kmh < 5) return 'standing still';
@@ -697,12 +597,6 @@ function updateHUD() {
   H.oatcap.textContent = oatCaption(S.oatC);
   H.windcap.textContent = windCaption(S.windKt * 1.852);
   H.narr.innerHTML = narrator();
-  if (S.mode !== 'demo' && S.mode !== 'flying') S.attWord = '';
-  else if (Math.abs(S.roll) > 10) S.attWord = S.roll > 0 ? 'banking right' : 'banking left';
-  else if (S.vs > 3) S.attWord = 'climbing';
-  else if (S.vs < -3) S.attWord = 'descending';
-  else if (S.alt < 20) S.attWord = S.gs * MS2KT > 25 ? 'rolling' : 'on the ground';
-  else S.attWord = 'level flight';
 }
 
 function updateStatus() {
@@ -732,8 +626,7 @@ function frame(now) {
   }
   if (now - lastDraw > 40) {
     lastDraw = now;
-    if (S.view === '3d') draw3D(); else drawADI(S.pitch, S.roll);
-    drawProfile();
+    draw3D();
   }
   if (now - lastHud > 100) {
     lastHud = now;
@@ -757,7 +650,6 @@ function showOverlay(title, sub, resetOnly) {
 H.demo.onclick = () => {
   S.mode = 'demo'; S.t0 = performance.now(); S.flightT = 0;
   S.samples = []; S.altHist = []; S.maxAlt = 0; S.maxGs = 0;
-  setView('3d');
   hideOverlay();
 };
 
@@ -775,16 +667,16 @@ H.start.onclick = async () => {
 
 H.reset.onclick = () => location.reload();
 
-const setView = v => {
-  S.view = v;
-  H.vdial.classList.toggle('on', v === 'dial');
-  H.v3d.classList.toggle('on', v === '3d');
-  H.horizon.style.display = v === 'dial' ? '' : 'none';
-  H.gl.style.display = v === '3d' ? '' : 'none';
-};
-H.vdial.onclick = () => setView('dial');
-H.v3d.onclick = () => setView('3d');
-
 /* ---------------- offline ---------------- */
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
   navigator.serviceWorker.register('sw.js').catch(() => {});
+
+/* test hook — ?demo=1&t=120 opens the demo at that moment */
+(function () {
+  const q = new URLSearchParams(location.search);
+  if (!q.get('demo')) return;
+  S.mode = 'demo';
+  S.t0 = performance.now() - parseFloat(q.get('t') || '0') * 1000;
+  S.samples = []; S.altHist = []; S.maxAlt = 0; S.maxGs = 0;
+  hideOverlay();
+})();
