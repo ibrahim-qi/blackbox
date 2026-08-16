@@ -457,7 +457,8 @@ function sunDir() {
   const solarTime = now.getUTCHours() + now.getUTCMinutes() / 60 + lng * 12 / Math.PI;
   const ha = (solarTime - 12) * 15 * Math.PI / 180;
   const sinEl = Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl) * Math.cos(ha);
-  const el = Math.asin(sinEl);
+  let el = Math.asin(sinEl);
+  if (el < 0.1) el = 0.35;   // night demos still read well — never fully dark
   const cosAz = (Math.sin(decl) - Math.sin(lat) * sinEl) / (Math.cos(lat) * Math.cos(el));
   const az = Math.acos(clamp(cosAz, -1, 1));
   const azimuth = Math.sin(ha) > 0 ? az : -az;              // east positive
@@ -617,7 +618,7 @@ function glInit() {
   scene.add(ground);
 
   if (!S.clean) {
-    /* planned route, always visible */
+    /* planned route, always visible — the map's own labels name the cities */
     const routePts = [];
     for (let i = 0; i <= 80; i++) {
       const f = i / 80;
@@ -632,14 +633,6 @@ function glInit() {
     );
     routeLine.position.y = 4;
     scene.add(routeLine);
-
-    /* cities on the corridor */
-    for (const c of DEMO_CITIES) {
-      const xy = toXY(c[1], c[2]);
-      const sp = makeLabel(c[0], 3600);
-      sp.position.set(xy[0], 90, -xy[1]);
-      scene.add(sp);
-    }
   }
 
   /* traffic dots + labels */
