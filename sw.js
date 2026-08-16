@@ -1,5 +1,6 @@
-/* blackbox service worker — cache-first, works in airplane mode */
-const CACHE = 'blackbox-v3';
+/* blackbox service worker — network-first, cache fallback.
+   Fresh code whenever online, fully cached for airplane mode. */
+const CACHE = 'blackbox-v4';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './three.min.js', './manifest.json'];
 
 self.addEventListener('install', e => {
@@ -17,12 +18,12 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   e.respondWith(
-    caches.match(e.request).then(hit =>
-      hit || fetch(e.request).then(res => {
-        const copy = res.clone();
-        caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
-        return res;
-      }).catch(() => caches.match('./index.html'))
+    fetch(e.request).then(res => {
+      const copy = res.clone();
+      caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
+      return res;
+    }).catch(() =>
+      caches.match(e.request).then(hit => hit || caches.match('./index.html'))
     )
   );
 });

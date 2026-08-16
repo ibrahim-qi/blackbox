@@ -314,8 +314,8 @@ function sunDir() {
 /* the plane — a low-poly a320 built from geometry, nose +Z, wings ±X, up +Y */
 function buildPlane() {
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x3c3d42, flatShading: true, side: THREE.DoubleSide });
-  const edgeMat = new THREE.LineBasicMaterial({ color: 0xffb454, transparent: true, opacity: .6 });
+  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x4a4b51, flatShading: true, side: THREE.DoubleSide });
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0xffb454, transparent: true, opacity: .7 });
 
   const add = (geo, x, y, z, rx, ry, rz) => {
     const grp = new THREE.Group();
