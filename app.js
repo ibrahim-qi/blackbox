@@ -468,8 +468,8 @@ function sunDir() {
 /* the plane — a low-poly a320 built from geometry, nose +Z, wings ±X, up +Y */
 function buildPlane() {
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x4a4b51, flatShading: true, side: THREE.DoubleSide });
-  const edgeMat = new THREE.LineBasicMaterial({ color: 0xffb454, transparent: true, opacity: .7 });
+  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x55565c, flatShading: true, side: THREE.DoubleSide });
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0xffb454, transparent: true, opacity: .85 });
 
   const add = (geo, x, y, z, rx, ry, rz) => {
     const grp = new THREE.Group();
@@ -691,7 +691,7 @@ function draw3D() {
   GL.ground.position.set(P.x, 0, P.z);
 
   /* cinematic chase cam — behind and above, softly damped */
-  const D = S.camD || 75, CH = S.camH || 34, LT = S.camL || 0;
+  const D = S.camD || 65, CH = S.camH || 20, LT = S.camL || 0;
   const eye = new THREE.Vector3(P.x - fw[0] * D, P.y + CH, P.z - fw[1] * D);
   if (!GL.cam || GL.cam.distanceTo(eye) > 2000) GL.cam = eye.clone();   // snap on big jumps
   else GL.cam.lerp(eye, .14);
