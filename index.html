@@ -14,7 +14,10 @@
 <body>
 <header>
   <div class="mode" id="status">&mdash;</div>
-  <button class="view" id="view">dial</button>
+  <div class="seg">
+    <button class="s on" id="vdial">dial</button>
+    <button class="s" id="v3d">3d</button>
+  </div>
   <div class="pos" id="pos">blackbox</div>
 </header>
 <canvas id="horizon"></canvas>
@@ -26,9 +29,7 @@
   <div class="cell"><div class="k">wind</div><div class="v"><span id="wind">0</span><em>km/h</em></div><div class="cap" id="windcap">&mdash;</div></div>
 </div>
 <canvas id="profile"></canvas>
-<div class="pro" id="pro">&mdash;</div>
 <div class="note">auto-lock &rarr; never &middot; window seat &middot; phone flat &middot; keep open</div>
-<div class="dbg" id="dbg">sensor debug appears in live mode</div>
 <div id="overlay">
   <h1>black<span>box</span></h1>
   <div class="sub" id="osub">EZY2899 &middot; BRISTOL &rarr; SEVILLE &middot; AIRBUS A320 &middot; DEP 16:40 &middot; works entirely offline &mdash; gps, gyros and maths only</div>

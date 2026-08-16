@@ -45,10 +45,8 @@ header { display: flex; justify-content: space-between; align-items: baseline; g
   color: var(--fg); min-height: 44px; padding: 0 6px;
 }
 .narr b { color: var(--accent); font-weight: 500; }
-.pro { font-size: 9px; letter-spacing: .14em; color: var(--faint); text-align: center; text-transform: uppercase; min-height: 12px; }
 #profile { width: 100%; height: 92px; display: block; }
 .note { font-size: 9px; letter-spacing: .14em; color: var(--faint); text-align: center; text-transform: uppercase; }
-.dbg { font-size: 9px; letter-spacing: .06em; color: var(--faint); text-align: center; min-height: 12px; }
 #overlay {
   position: fixed; inset: 0; z-index: 10; background: var(--bg);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -66,5 +64,10 @@ button {
 }
 button:active { background: var(--hairline); }
 button.primary { border-color: var(--accent); color: var(--accent); }
-button.view { padding: 4px 12px; font-size: 10px; letter-spacing: .14em; color: var(--dim); }
+.seg { display: flex; border: 1px solid var(--hairline); border-radius: 999px; overflow: hidden; }
+.seg .s {
+  padding: 5px 14px; font-size: 10px; letter-spacing: .14em;
+  border: none; border-radius: 0; color: var(--dim); background: transparent;
+}
+.seg .s.on { color: var(--accent); background: rgba(255, 180, 84, .07); }
 #reset { display: none; }

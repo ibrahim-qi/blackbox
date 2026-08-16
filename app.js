@@ -10,9 +10,9 @@ const H = {
   status: $('status'), pos: $('pos'),
   gs: $('gs'), alt: $('alt'), oat: $('oat'), wind: $('wind'),
   gscap: $('gscap'), altcap: $('altcap'), oatcap: $('oatcap'), windcap: $('windcap'),
-  narr: $('narr'), pro: $('pro'),
-  view: $('view'),
-  dbg: $('dbg'), horizon: $('horizon'), profile: $('profile'),
+  narr: $('narr'),
+  vdial: $('vdial'), v3d: $('v3d'),
+  horizon: $('horizon'), profile: $('profile'),
   overlay: $('overlay'), osub: $('osub'), start: $('start'), demo: $('demo'), reset: $('reset')
 };
 
@@ -579,38 +579,23 @@ function updateHUD() {
   else if (S.vs < -3) S.attWord = 'descending';
   else if (S.alt < 20) S.attWord = S.gs * MS2KT > 25 ? 'rolling' : 'on the ground';
   else S.attWord = 'level flight';
-  H.pro.textContent = (S.mode === 'demo' ? 'simulated · ' : '') + 'pilot units · ' +
-    group(S.gs * MS2KT) + ' kt · M ' + S.mach.toFixed(2) + ' · FL' +
-    Math.round(S.alt * M2FT / 100) + ' · ' + (S.vs >= 0 ? '+' : '−') + group(Math.abs(S.vs * MS2FPM)) + ' fpm' +
-    (S.mode === 'demo' && S.trafficN ? ' · traffic ' + S.trafficN + ' · typical' : '');
 }
 
 function updateStatus() {
   if (S.mode === 'demo') {
-    H.status.innerHTML = 'demo <span class="live">· t+' + fmtT(S.flightT) + '</span>';
+    H.status.innerHTML = 'demo <span class="live">· flight ' + fmtT(S.flightT) + '</span>';
     H.pos.textContent = 'brs → svq';
   } else if (S.mode === 'armed') {
     H.status.innerHTML = S.fix ? 'armed · ezy2899 <span class="live">· gps fix</span>' : 'armed · ezy2899 · awaiting gps';
     H.pos.textContent = S.fix ? fmtLat(S.lat) + ' ' + fmtLng(S.lng) : 'no fix — near a window';
   } else if (S.mode === 'flying') {
-    H.status.innerHTML = 'live <span class="live">· t+' + fmtT(S.flightT) + '</span>';
-    H.pos.textContent = S.fix ? fmtLat(S.lat) + ' ' + fmtLng(S.lng) : 'dead reckoning';
+    H.status.innerHTML = 'live <span class="live">· flight ' + fmtT(S.flightT) + '</span>';
+    H.pos.textContent = S.fix ? fmtLat(S.lat) + ' ' + fmtLng(S.lng) : 'no gps — following the planned route';
   } else if (S.mode === 'landed') {
     H.status.textContent = 'landed';
   } else {
     H.status.textContent = '—';
     H.pos.textContent = 'blackbox';
-  }
-}
-
-function updateDbg() {
-  if (S.mode === 'armed' || S.mode === 'flying') {
-    H.dbg.textContent = 'ax ' + DBG.ax.toFixed(2) + ' ay ' + DBG.ay.toFixed(2) + ' az ' + DBG.az.toFixed(2) +
-      ' · β ' + DBG.ry.toFixed(1) + ' γ ' + DBG.rz.toFixed(1) +
-      ' · p ' + FUSE.pitch.toFixed(1) + '° r ' + FUSE.roll.toFixed(1) + '°' +
-      (S.fixAcc != null ? ' · fix ±' + Math.round(S.fixAcc) + 'm' : '');
-  } else {
-    H.dbg.textContent = S.mode === 'demo' ? 'sensor debug appears in live mode' : '';
   }
 }
 
@@ -628,7 +613,7 @@ function frame(now) {
   }
   if (now - lastHud > 100) {
     lastHud = now;
-    updateHUD(); updateStatus(); updateDbg();
+    updateHUD(); updateStatus();
   }
 }
 requestAnimationFrame(frame);
@@ -648,6 +633,7 @@ function showOverlay(title, sub, resetOnly) {
 H.demo.onclick = () => {
   S.mode = 'demo'; S.t0 = performance.now(); S.flightT = 0;
   S.samples = []; S.altHist = []; S.maxAlt = 0; S.maxGs = 0;
+  setView('3d');
   hideOverlay();
 };
 
@@ -665,10 +651,13 @@ H.start.onclick = async () => {
 
 H.reset.onclick = () => location.reload();
 
-H.view.onclick = () => {
-  S.view = S.view === 'dial' ? '3d' : 'dial';
-  H.view.textContent = S.view;
+const setView = v => {
+  S.view = v;
+  H.vdial.classList.toggle('on', v === 'dial');
+  H.v3d.classList.toggle('on', v === '3d');
 };
+H.vdial.onclick = () => setView('dial');
+H.v3d.onclick = () => setView('3d');
 
 /* ---------------- offline ---------------- */
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
