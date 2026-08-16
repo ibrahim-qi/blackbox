@@ -34,7 +34,7 @@ const group = n => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' '
 const fmtT = s => { s = Math.max(0, s | 0); const m = (s / 60) | 0, r = s % 60; return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r; };
 const fmtLat = v => Math.abs(v).toFixed(2) + '°' + (v >= 0 ? 'N' : 'S');
 const fmtLng = v => Math.abs(v).toFixed(2) + '°' + (v >= 0 ? 'E' : 'W');
-const fmtEta = s => { s = Math.max(0, s | 0); const h = (s / 3600) | 0, m = Math.round((s % 3600) / 60); return h ? h + 'h ' + m + 'm' : m + 'm'; };
+const fmtEta = s => { s = Math.max(0, s | 0); if (s < 60) return s + 's'; const h = (s / 3600) | 0, m = Math.round((s % 3600) / 60); return h ? h + 'h ' + m + 'm' : m + 'm'; };
 
 /* ---------------- atmosphere model (ISA) ---------------- */
 function isa(altM) {
@@ -171,7 +171,7 @@ function land() {
     group(S.maxGs * 1.852) + ' km/h &middot; ' + S.samples.length + ' samples &middot; full report at the gate', true);
 }
 
-setInterval(() => {
+function tick() {
   if (S.mode === 'demo') {
     const t = (performance.now() - S.t0) / 1000;
     if (t >= DEMO_T) { land(); return; }
@@ -206,7 +206,8 @@ setInterval(() => {
       if (S.flightT > 60 && S.gs * MS2KT < 25 && S.alt < 150) land();
     }
   }
-}, 1000);
+}
+setInterval(tick, 1000);
 
 /* ---------------- render ---------------- */
 
@@ -485,7 +486,7 @@ function draw3D() {
   const fw = [Math.sin(psi), -Math.cos(psi)];
 
   const pl = GL.plane;
-  pl.position.copy(P);
+  pl.position.set(P.x, P.y + 2.5, P.z);   // fuselage rides above the runway, not in it
   pl.rotation.y = Math.PI - psi;
   pl.rotation.x = -S.pitch * Math.PI / 180;
   pl.rotation.z = -S.roll * Math.PI / 180;
@@ -537,7 +538,7 @@ function draw3D() {
 
   /* altitude hairline */
   const hp = GL.hair.geometry.attributes.position;
-  hp.setXYZ(0, P.x, P.y, P.z);
+  hp.setXYZ(0, P.x, P.y + 2.5, P.z);
   hp.setXYZ(1, P.x, 4, P.z);
   hp.needsUpdate = true;
 
@@ -581,6 +582,7 @@ function narrator() {
     if (S.alt < 20) {
       if (S.vs > 1) s = 'Wheels up.';
       else if (kmh < 30) s = S.flightT > 60 ? 'Touched down — welcome to Seville.' : 'Lined up on the runway — here we go.';
+      else if (kmh < 220 && S.flightT > 60) s = 'Slowing on the runway — welcome to Seville.';
       else s = 'Rolling down the runway at <b>' + Math.round(kmh) + ' km/h</b>.';
     } else if (Math.abs(S.roll) > 10 && km > 8) {
       s = 'Banking ' + (S.roll > 0 ? 'right' : 'left') + ' — a turn in the flight path.';
@@ -693,9 +695,7 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
 /* test hook — ?demo=1&t=120 opens the demo at that moment */
 (function () {
   const q = new URLSearchParams(location.search);
-  if (!q.get('demo')) return;
-  S.mode = 'demo';
-  const t = parseFloat(q.get('t') || '0');
+  if (!q.get('demo') && !q.get('live') && !q.get('landtest')) return;
   S.camD = parseFloat(q.get('cam') || '0') || null;
   S.camH = parseFloat(q.get('ch') || '0') || null;
   S.camL = parseFloat(q.get('lt') || '0') || null;
@@ -706,13 +706,17 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
   const hq = parseFloat(q.get('h') || '0');
   if (hq) { H.gl.style.height = hq + 'px'; H.gl.style.flex = 'none'; }
   if (q.get('test')) document.body.style.background = 'rgb(200,0,0)';
-  S.t0 = performance.now() - t * 1000;
-  S.samples = []; S.altHist = []; S.maxAlt = 0; S.maxGs = 0;
-  hideOverlay();
-  /* paint state synchronously so headless dumps are deterministic */
-  Object.assign(S, demoStep(t));
-  S.flightT = t;
-  updateHUD(); updateStatus();
+  if (q.get('demo')) {
+    S.mode = 'demo';
+    const t = parseFloat(q.get('t') || '0');
+    S.t0 = performance.now() - t * 1000;
+    S.samples = []; S.altHist = []; S.maxAlt = 0; S.maxGs = 0;
+    hideOverlay();
+    /* paint state synchronously so headless dumps are deterministic */
+    Object.assign(S, demoStep(t));
+    S.flightT = t;
+    updateHUD(); updateStatus();
+  }
   if (q.get('shot')) {
     try {
       glInit(); draw3D();
@@ -724,5 +728,36 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol))
       document.body.appendChild(img);
       console.log('SHOT ready len', url.length);
     } catch (e) { console.log('SHOT err', e.message); }
+  }
+  if (q.get('landtest')) {
+    /* simulate a finished flight and verify the complete overlay */
+    S.mode = 'flying';
+    S.flightT = 8400;
+    S.maxAlt = 10668;
+    S.maxGs = 470;
+    S.samples = Array(100).fill(1);
+    land();
+  }
+  if (q.get('live')) {
+    /* synthetic gps along the real route, compressed — exercises the whole
+       live path: armed → takeoff detection → recording → gps dropout →
+       dead reckoning → landing detection → complete */
+    S.mode = 'armed';
+    S.fix = true;
+    S.liveT = 0;
+    const realNow = performance.now;
+    performance.now = () => S.liveT * 1000;     // tick sees a 1s clock
+    try {
+      for (let i = 0; i < 340; i++) {
+        S.liveT += 1;
+        S.fix = S.liveT < 30 || S.liveT > 45;   // gps drops mid-climb
+        if (S.fix) {
+          const o = demoStep(S.liveT);
+          S.lat = o.lat; S.lng = o.lng; S.alt = o.alt; S.gs = o.gs;
+        }
+        tick();
+      }
+    } finally { performance.now = realNow; }
+    updateHUD(); updateStatus();
   }
 })();
